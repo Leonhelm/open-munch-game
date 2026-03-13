@@ -24,7 +24,10 @@ export class GameStateService {
   });
   readonly isGameOver = computed(() => this._state()?.winnerId !== null);
 
-  constructor(private readonly deckService: DeckService) {}
+  constructor(
+    private readonly deckService: DeckService,
+    private readonly equipmentService: EquipmentService,
+  ) {}
 
   startGame(botCount: number): void {
     this.doorDeck = this.deckService.createDeck(DOOR_CARDS);
@@ -222,6 +225,20 @@ export class GameStateService {
             : p
         );
         return { ...s, players, log: [...s.log, `${player.name} стал ${card.name}!`] };
+      });
+      return true;
+    }
+
+    if (card.type === 'equipment') {
+      const eqCard = card as EquipmentCard;
+      if (!this.equipmentService.canEquip(player, eqCard)) return false;
+      this.updateState(s => {
+        const currentPlayer = s.players[s.currentPlayerIndex]!;
+        const result = this.equipmentService.equip(currentPlayer, eqCard);
+        const players = s.players.map((p, i) =>
+          i === s.currentPlayerIndex ? result.player : p
+        );
+        return { ...s, players, log: [...s.log, `${player.name} надел ${card.name} (+${eqCard.bonus})`] };
       });
       return true;
     }
