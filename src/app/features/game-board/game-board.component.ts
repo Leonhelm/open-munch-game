@@ -1,11 +1,11 @@
-import { Component, ChangeDetectionStrategy, computed, inject } from '@angular/core';
+import { Component, ChangeDetectionStrategy, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { GameStateService } from '../../core/engine/game-state.service';
 import { BotService } from '../../core/bot/bot.service';
 import { EquipmentService } from '../../core/engine/equipment.service';
 import { HandComponent } from '../hand/hand.component';
 import { CombatComponent } from '../combat/combat.component';
-import { getCombatStrength } from '../../core/models';
+import { getCombatStrength, Card } from '../../core/models';
 
 @Component({
   selector: 'app-game-board',
@@ -64,7 +64,18 @@ import { getCombatStrength } from '../../core/models';
                   <button class="action-btn" (click)="lootRoom()">Обыскать комнату</button>
                 }
                 @case ('charity') {
-                  <button class="action-btn" (click)="endTurn()">Завершить ход</button>
+                  @if (charityInfo(); as info) {
+                    @if (info.excess > 0) {
+                      <p class="charity-msg">Сбросьте {{ info.excess }} карт (лимит: {{ info.limit }}). Кликните на карту для сброса.</p>
+                    }
+                    @if (selectedForSale().length > 0) {
+                      <div class="sell-info">
+                        <span>Продажа: {{ selectedGoldTotal() }} золота</span>
+                        <button class="action-btn sell-btn" (click)="sellSelected()">Продать</button>
+                      </div>
+                    }
+                    <button class="action-btn" [disabled]="info.excess > 0" (click)="endTurn()">Завершить ход</button>
+                  }
                 }
                 @case ('end-turn') {
                   <button class="action-btn" (click)="endTurn()">Завершить ход</button>
@@ -185,6 +196,10 @@ import { getCombatStrength } from '../../core/models';
     .eq-empty { font-size: 12px; color: #999; }
     .log-entries { font-size: 12px; }
     .log-entry { padding: 3px 0; border-bottom: 1px solid #f0f0f0; }
+    .charity-msg { font-size: 14px; color: #c62828; text-align: center; }
+    .sell-info { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .sell-btn { padding: 6px 16px; font-size: 14px; background: #2e7d32; }
+    .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .bot-turn { text-align: center; padding: 20px; color: #666; }
     .victory-overlay {
       position: fixed;
@@ -261,6 +276,26 @@ export class GameBoardComponent {
     return s.log.slice(-20).reverse();
   });
 
+  readonly selectedForSale = signal<string[]>([]);
+
+  readonly charityInfo = computed(() => {
+    const s = this.state();
+    if (!s) return null;
+    const p = s.players[s.currentPlayerIndex]!;
+    const limit = this.gameState.getHandLimit(p);
+    return { limit, excess: Math.max(0, p.hand.length - limit) };
+  });
+
+  readonly selectedGoldTotal = computed(() => {
+    const s = this.state();
+    if (!s) return 0;
+    const p = s.players[s.currentPlayerIndex]!;
+    const ids = new Set(this.selectedForSale());
+    return p.hand
+      .filter(c => ids.has(c.id))
+      .reduce((sum, c) => sum + ('goldValue' in c ? (c as { goldValue: number }).goldValue : 0), 0);
+  });
+
   readonly phaseLabel = computed(() => {
     const s = this.state();
     if (!s) return '';
@@ -301,12 +336,40 @@ export class GameBoardComponent {
   }
 
   playCard(cardId: string): void {
+    const s = this.state();
+    if (s?.turnPhase === 'charity') {
+      // In charity phase, clicking a card either discards it or toggles sell selection
+      const info = this.charityInfo();
+      if (info && info.excess > 0) {
+        this.gameState.discardFromHand(cardId);
+        return;
+      }
+      // Toggle sell selection
+      const current = this.selectedForSale();
+      if (current.includes(cardId)) {
+        this.selectedForSale.set(current.filter(id => id !== cardId));
+      } else {
+        this.selectedForSale.set([...current, cardId]);
+      }
+      return;
+    }
     this.gameState.playCardFromHand(cardId);
   }
 
+  sellSelected(): void {
+    const ids = this.selectedForSale();
+    if (ids.length > 0) {
+      this.gameState.sellCards(ids);
+      this.selectedForSale.set([]);
+    }
+  }
+
   endTurn(): void {
-    this.gameState.endTurn();
-    this.runBotTurns();
+    const success = this.gameState.endTurn();
+    if (success) {
+      this.selectedForSale.set([]);
+      this.runBotTurns();
+    }
   }
 
   backToLobby(): void {

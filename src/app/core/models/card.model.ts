@@ -12,6 +12,13 @@ export interface BaseCard {
   readonly description: string;
 }
 
+export type BadStuffEffect =
+  | { readonly kind: 'lose-levels'; readonly levels: number }
+  | { readonly kind: 'lose-equipment-slot'; readonly slot: EquipmentSlot }
+  | { readonly kind: 'lose-all-equipment' }
+  | { readonly kind: 'lose-hand' }
+  | { readonly kind: 'skip-turn' };
+
 export interface MonsterCard extends BaseCard {
   readonly type: 'monster';
   readonly deck: 'door';
@@ -19,6 +26,7 @@ export interface MonsterCard extends BaseCard {
   readonly treasures: number;
   readonly levelsGained: number;
   readonly badStuff: string;
+  readonly badStuffEffect: BadStuffEffect;
   readonly undead?: boolean;
 }
 

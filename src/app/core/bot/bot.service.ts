@@ -30,10 +30,10 @@ export class BotService {
         break;
       case 'loot-room':
         this.gameState.lootRoom();
-        this.gameState.endTurn();
+        this.handleCharity();
         break;
       case 'charity':
-        this.gameState.endTurn();
+        this.handleCharity();
         break;
       default:
         this.gameState.endTurn();
@@ -55,7 +55,7 @@ export class BotService {
       if (player) this.handleCombat(state, player);
     } else if (state.turnPhase === 'loot-room') {
       this.gameState.lootRoom();
-      this.gameState.endTurn();
+      this.handleCharity();
     } else {
       this.gameState.endTurn();
     }
@@ -76,20 +76,22 @@ export class BotService {
     }
   }
 
-  private equipBestItems(player: Player): void {
-    const equipmentCards = player.hand.filter(c => c.type === 'equipment');
+  private equipBestItems(player: Player): Player {
+    let current = player;
+    const equipmentCards = current.hand.filter(c => c.type === 'equipment');
     for (const card of equipmentCards) {
-      if (card.type === 'equipment' && this.equipmentService.canEquip(player, card)) {
-        // Simple strategy: equip if bonus is higher than what's equipped in that slot
-        const currentBonus = this.equipmentService.getEquipmentBonus(player.equipment);
-        const testResult = this.equipmentService.equip(player, card);
+      if (card.type === 'equipment' && this.equipmentService.canEquip(current, card)) {
+        const currentBonus = this.equipmentService.getEquipmentBonus(current.equipment);
+        const testResult = this.equipmentService.equip(current, card);
         const newBonus = this.equipmentService.getEquipmentBonus(testResult.player.equipment);
         if (newBonus > currentBonus) {
-          // Actually play it via gameState would require integration
-          // For now bots just try to equip through state
+          this.gameState.playCardFromHand(card.id);
+          const state = this.gameState.getState();
+          if (state) current = state.players[state.currentPlayerIndex]!;
         }
       }
     }
+    return current;
   }
 
   private playUsefulCards(player: Player): void {
@@ -111,6 +113,31 @@ export class BotService {
         this.gameState.playCardFromHand(card.id);
       }
     }
+  }
+
+  private handleCharity(): void {
+    const state = this.gameState.getState();
+    if (!state) return;
+    const player = state.players[state.currentPlayerIndex];
+    if (!player) return;
+
+    const limit = this.gameState.getHandLimit(player);
+    // Discard lowest-value cards first
+    const cardsToDiscard = [...player.hand]
+      .sort((a, b) => {
+        const aVal = 'goldValue' in a ? (a as { goldValue: number }).goldValue : 0;
+        const bVal = 'goldValue' in b ? (b as { goldValue: number }).goldValue : 0;
+        return aVal - bVal;
+      });
+
+    let discarded = 0;
+    while (cardsToDiscard.length > 0 && (player.hand.length - discarded) > limit) {
+      const card = cardsToDiscard.shift()!;
+      this.gameState.discardFromHand(card.id);
+      discarded++;
+    }
+
+    this.gameState.endTurn();
   }
 
   private useOneShotsIfNeeded(state: GameState, player: Player): void {

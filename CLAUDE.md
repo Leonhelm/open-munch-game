@@ -56,12 +56,12 @@ src/app/
 - [x] **Тесты экипировки** — `equipment.service.spec.ts` (16 тестов)
 - [x] **Сервис состояния игры** — `game-state.service.ts`: `startGame()`, `kickDoor()`, `resolveCombat()`, `runAway()`, `endTurn()`, `playCardFromHand()`, `useOneShotInCombat()`, `lootRoom()`
 - [x] **Тесты состояния** — `game-state.service.spec.ts`
-- [ ] **Интеграция экипировки в GameStateService** — обновление экипировки игрока через `equip()`/`unequip()` в состоянии (TODO в коде)
-- [ ] **Полная реализация проклятий** — все типы `CurseEffect` (lose-equipment, lose-hand, lose-class, lose-race) с корректной обработкой
-- [ ] **Bad stuff монстров** — последствия проигрыша в бою (сейчас только потеря уровня)
+- [x] **Интеграция экипировки в GameStateService** — обновление экипировки игрока через `equip()`/`unequip()` в состоянии, боты экипируют через `playCardFromHand()`
+- [x] **Полная реализация проклятий** — все типы `CurseEffect` (lose-equipment, lose-hand, lose-class, lose-race) с корректной обработкой, карты уходят в discard
+- [x] **Bad stuff монстров** — структурированный `BadStuffEffect` на модели `MonsterCard`, обработка lose-levels, lose-equipment-slot, lose-all-equipment, lose-hand, skip-turn
 - [ ] **Система помощника в бою** — `CombatState.helper` определён, но не используется
-- [ ] **Лимит карт на руке** — сброс лишних карт в фазе charity (6 для Дварфа, 5 для остальных)
-- [ ] **Продажа карт / золото** — обмен 1000 золота на уровень
+- [x] **Лимит карт на руке** — сброс лишних карт в фазе charity (6 для Дварфа, 5 для остальных), UI для сброса, боты сбрасывают автоматически
+- [x] **Продажа карт / золото** — обмен 1000 золота на уровень, UI для продажи в фазе charity
 
 ### Этап 3 — AI ботов
 
@@ -83,7 +83,7 @@ src/app/
 
 - [x] **Конфигурация приложения** — `app.config.ts`: zoneless, router
 - [x] **Корневой компонент** — `app.ts`: `<router-outlet />`
-- [ ] **Определение маршрутов** — `app.routes.ts` пуст! Нужно: `/` → Lobby, `/game` → GameBoard
+- [x] **Определение маршрутов** — `app.routes.ts`: `/` → Lobby, `/game` → GameBoard
 - [x] **GitHub Pages деплой** — GitHub Actions workflow для автоматической сборки и публикации на GitHub Pages
 
 ### Этап 6 — Особые способности классов и рас
@@ -111,6 +111,5 @@ src/app/
 
 ## Известные проблемы
 
-- `app.routes.ts` — маршруты не определены, навигация между Lobby и GameBoard не работает
-- Экипировка не обновляется в `GameStateService` при разыгрывании из руки
 - `shared/` папка пустая / не создана
+- Система помощника в бою не реализована (`CombatState.helperId`/`helperBonuses` определены, но не используются)
