@@ -1,9 +1,10 @@
 import { computed, Injectable, signal } from '@angular/core';
 import {
-  Card, CombatState, DoorCard, GameState, MonsterCard,
+  Card, CombatState, DoorCard, EquipmentCard, GameState, MonsterCard,
   OneShotCard, Player, TurnPhase, createPlayer, TreasureCard,
 } from '../models';
 import { DeckService, Deck } from './deck.service';
+import { EquipmentService } from './equipment.service';
 import { DOOR_CARDS } from '../../data/door-cards';
 import { TREASURE_CARDS } from '../../data/treasure-cards';
 
