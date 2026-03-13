@@ -1,7 +1,8 @@
 import { computed, Injectable, signal } from '@angular/core';
 import {
-  Card, CombatState, DoorCard, EquipmentCard, GameState, MonsterCard,
-  OneShotCard, Player, TurnPhase, createPlayer, TreasureCard,
+  BadStuffEffect, Card, CombatState, CurseCard, CurseEffect, DoorCard,
+  EquipmentCard, GameState, MonsterCard, OneShotCard, Player, TurnPhase,
+  createPlayer, TreasureCard, EMPTY_EQUIPMENT,
 } from '../models';
 import { DeckService, Deck } from './deck.service';
 import { EquipmentService } from './equipment.service';
@@ -171,30 +172,40 @@ export class GameStateService {
       }
 
       // Bad stuff
-      const players = this.applyBadStuff(state);
+      const afterBadStuff = this.applyBadStuff(state);
       return {
-        ...state,
-        players,
+        ...afterBadStuff,
         turnPhase: 'charity' as TurnPhase,
         combat: null,
-        log: [...state.log, `${this.getCurrentPlayerName(state)} бросил ${diceRoll} и не смог сбежать! ${state.combat!.monster.badStuff}`],
+        log: [...afterBadStuff.log, `${this.getCurrentPlayerName(state)} бросил ${diceRoll} и не смог сбежать! ${state.combat!.monster.badStuff}`],
       };
     });
 
     return escaped;
   }
 
-  endTurn(): void {
-    this.updateState(state => {
-      const nextIndex = (state.currentPlayerIndex + 1) % state.players.length;
+  endTurn(): boolean {
+    const state = this._state();
+    if (!state) return false;
+
+    // Check hand limit for human players in charity phase
+    const player = state.players[state.currentPlayerIndex]!;
+    if (state.turnPhase === 'charity' && player.isHuman) {
+      const limit = this.getHandLimit(player);
+      if (player.hand.length > limit) return false;
+    }
+
+    this.updateState(s => {
+      const nextIndex = (s.currentPlayerIndex + 1) % s.players.length;
       return {
-        ...state,
+        ...s,
         currentPlayerIndex: nextIndex,
         turnPhase: 'kick-door' as TurnPhase,
         combat: null,
-        log: [...state.log, `Ход переходит к ${state.players[nextIndex]!.name}`],
+        log: [...s.log, `Ход переходит к ${s.players[nextIndex]!.name}`],
       };
     });
+    return true;
   }
 
   playCardFromHand(cardId: string): boolean {
@@ -259,6 +270,76 @@ export class GameStateService {
     return false;
   }
 
+  getHandLimit(player: Player): number {
+    return player.raceName === 'dwarf' ? 6 : 5;
+  }
+
+  discardFromHand(cardId: string): void {
+    this.updateState(state => {
+      const player = state.players[state.currentPlayerIndex]!;
+      const card = player.hand.find(c => c.id === cardId);
+      if (!card) return state;
+
+      const players = this.updateCurrentPlayerHand(state, hand => hand.filter(c => c.id !== cardId));
+
+      if (card.deck === 'door') {
+        return { ...state, players, doorDiscard: [...state.doorDiscard, card as DoorCard] };
+      }
+      return { ...state, players, treasureDiscard: [...state.treasureDiscard, card as TreasureCard] };
+    });
+  }
+
+  sellCards(cardIds: string[]): boolean {
+    const state = this._state();
+    if (!state) return false;
+
+    const player = state.players[state.currentPlayerIndex]!;
+    const cardsToSell = cardIds
+      .map(id => player.hand.find(c => c.id === id))
+      .filter((c): c is Card => c !== undefined);
+
+    const totalGold = cardsToSell.reduce((sum, c) => {
+      if ('goldValue' in c) return sum + (c as { goldValue: number }).goldValue;
+      return sum;
+    }, 0);
+
+    const levelsGained = Math.floor(totalGold / 1000);
+    if (levelsGained === 0 && cardsToSell.length === 0) return false;
+
+    this.updateState(s => {
+      const soldIds = new Set(cardIds);
+      const soldCards = cardsToSell;
+      const players = s.players.map((p, i) => {
+        if (i !== s.currentPlayerIndex) return p;
+        return {
+          ...p,
+          level: p.level + levelsGained,
+          hand: p.hand.filter(c => !soldIds.has(c.id)),
+        };
+      });
+
+      const doorDiscards = soldCards.filter(c => c.deck === 'door') as DoorCard[];
+      const treasureDiscards = soldCards.filter(c => c.deck === 'treasure') as TreasureCard[];
+
+      let newState: GameState = {
+        ...s,
+        players,
+        doorDiscard: [...s.doorDiscard, ...doorDiscards],
+        treasureDiscard: [...s.treasureDiscard, ...treasureDiscards],
+        log: levelsGained > 0
+          ? [...s.log, `${this.getCurrentPlayerName(s)} продал карты за ${totalGold} золота и получил ${levelsGained} уровень!`]
+          : [...s.log, `${this.getCurrentPlayerName(s)} продал карты за ${totalGold} золота (недостаточно для уровня)`],
+      };
+
+      if (levelsGained > 0) {
+        newState = this.checkWinCondition(newState);
+      }
+      return newState;
+    });
+
+    return levelsGained > 0;
+  }
+
   getState(): GameState | null {
     return this._state();
   }
@@ -299,35 +380,140 @@ export class GameStateService {
     });
   }
 
-  private applyBadStuff(state: GameState): readonly Player[] {
-    if (!state.combat) return state.players;
+  private applyBadStuff(state: GameState): GameState {
+    if (!state.combat) return state;
     const monster = state.combat.monster;
+    const effect = monster.badStuffEffect;
+    const player = state.players[state.currentPlayerIndex]!;
+    let updatedPlayer: Player;
+    const discardedCards: Card[] = [];
+    let skipNextTurn = false;
 
-    return state.players.map((p, i) => {
-      if (i !== state.currentPlayerIndex) return p;
-      // Simple bad stuff: lose 1 level (minimum 1)
-      return { ...p, level: Math.max(1, p.level - 1) };
-    });
+    switch (effect.kind) {
+      case 'lose-levels':
+        updatedPlayer = { ...player, level: Math.max(1, player.level - effect.levels) };
+        break;
+      case 'lose-equipment-slot': {
+        const result = this.equipmentService.unequipSlot(player, effect.slot);
+        if (result.card) {
+          discardedCards.push(result.card);
+          updatedPlayer = { ...result.player, hand: result.player.hand.filter(c => c.id !== result.card!.id) };
+        } else {
+          updatedPlayer = player;
+        }
+        break;
+      }
+      case 'lose-all-equipment': {
+        const equipped = this.equipmentService.getAllEquipped(player.equipment);
+        discardedCards.push(...equipped);
+        updatedPlayer = { ...player, equipment: EMPTY_EQUIPMENT };
+        break;
+      }
+      case 'lose-hand': {
+        discardedCards.push(...player.hand);
+        updatedPlayer = { ...player, hand: [] };
+        break;
+      }
+      case 'skip-turn': {
+        updatedPlayer = player;
+        skipNextTurn = true;
+        break;
+      }
+      default:
+        updatedPlayer = player;
+    }
+
+    const players = state.players.map((p, i) =>
+      i === state.currentPlayerIndex ? updatedPlayer : p
+    );
+
+    const doorDiscards = discardedCards.filter(c => c.deck === 'door') as DoorCard[];
+    const treasureDiscards = discardedCards.filter(c => c.deck === 'treasure') as TreasureCard[];
+
+    let nextState: GameState = {
+      ...state,
+      players,
+      doorDiscard: [...state.doorDiscard, ...doorDiscards],
+      treasureDiscard: [...state.treasureDiscard, ...treasureDiscards],
+    };
+
+    // Skip turn: advance currentPlayerIndex by 1 extra (will be advanced again in endTurn)
+    if (skipNextTurn) {
+      nextState = {
+        ...nextState,
+        log: [...nextState.log, `${player.name} пропускает следующий ход!`],
+      };
+    }
+
+    return nextState;
   }
 
-  private applyCurseToState(state: GameState, card: { name: string; effect: { kind: string } }): GameState {
-    const players = state.players.map((p, i) => {
-      if (i !== state.currentPlayerIndex) return p;
-      switch (card.effect.kind) {
-        case 'lose-level':
-          return { ...p, level: Math.max(1, p.level - 1) };
-        case 'lose-class':
-          return { ...p, className: null };
-        case 'lose-race':
-          return { ...p, raceName: null };
-        default:
-          return { ...p, level: Math.max(1, p.level - 1) };
+  private applyCurseToState(state: GameState, card: CurseCard): GameState {
+    const player = state.players[state.currentPlayerIndex]!;
+    const effect = card.effect;
+    let updatedPlayer: Player;
+    const discardedCards: Card[] = [];
+
+    switch (effect.kind) {
+      case 'lose-level':
+        updatedPlayer = { ...player, level: Math.max(1, player.level - effect.levels) };
+        break;
+      case 'lose-class':
+        updatedPlayer = { ...player, className: null };
+        break;
+      case 'lose-race':
+        updatedPlayer = { ...player, raceName: null };
+        break;
+      case 'lose-equipment': {
+        if (effect.slot) {
+          const result = this.equipmentService.unequipSlot(player, effect.slot);
+          // Card goes to discard, not hand — it's a curse
+          if (result.card) {
+            discardedCards.push(result.card);
+            updatedPlayer = { ...result.player, hand: result.player.hand.filter(c => c.id !== result.card!.id) };
+          } else {
+            updatedPlayer = player;
+          }
+        } else {
+          // No slot specified — lose a random equipped item
+          const equipped = this.equipmentService.getAllEquipped(player.equipment);
+          if (equipped.length > 0) {
+            const randomItem = equipped[Math.floor(Math.random() * equipped.length)]!;
+            const result = this.equipmentService.unequipSlot(player, randomItem.slot);
+            if (result.card) {
+              discardedCards.push(result.card);
+              updatedPlayer = { ...result.player, hand: result.player.hand.filter(c => c.id !== result.card!.id) };
+            } else {
+              updatedPlayer = player;
+            }
+          } else {
+            updatedPlayer = player;
+          }
+        }
+        break;
       }
-    });
+      case 'lose-hand': {
+        discardedCards.push(...player.hand);
+        updatedPlayer = { ...player, hand: [] };
+        break;
+      }
+      default:
+        updatedPlayer = player;
+    }
+
+    const players = state.players.map((p, i) =>
+      i === state.currentPlayerIndex ? updatedPlayer : p
+    );
+
+    // Sort discarded cards into door/treasure discard piles
+    const doorDiscards = discardedCards.filter(c => c.deck === 'door') as DoorCard[];
+    const treasureDiscards = discardedCards.filter(c => c.deck === 'treasure') as TreasureCard[];
 
     return {
       ...state,
       players,
+      doorDiscard: [...state.doorDiscard, ...doorDiscards],
+      treasureDiscard: [...state.treasureDiscard, ...treasureDiscards],
       turnPhase: 'loot-room' as TurnPhase,
       log: [...state.log, `${this.getCurrentPlayerName(state)} попал под проклятие: ${card.name}!`],
     };

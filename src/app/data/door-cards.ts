@@ -1,80 +1,95 @@
-import { ClassCard, CurseCard, DoorCard, MonsterCard, RaceCard } from '../core/models';
+import { BadStuffEffect, ClassCard, CurseCard, DoorCard, MonsterCard, RaceCard } from '../core/models';
 
 const monsters: MonsterCard[] = [
   {
     id: 'm1', name: 'Потлвинная Крыса', type: 'monster', deck: 'door',
     description: 'Мелкая, но злобная тварь из подземелья',
     level: 1, treasures: 1, levelsGained: 1, badStuff: 'Укусила за палец. Потеряй 1 уровень.',
+    badStuffEffect: { kind: 'lose-levels', levels: 1 },
   },
   {
     id: 'm2', name: 'Летучие Бизоны', type: 'monster', deck: 'door',
     description: 'Стадо летающих бизонов заполнило коридор',
     level: 2, treasures: 1, levelsGained: 1, badStuff: 'Затоптали! Потеряй 1 уровень.',
+    badStuffEffect: { kind: 'lose-levels', levels: 1 },
   },
   {
     id: 'm3', name: 'Гнусные Гномики', type: 'monster', deck: 'door',
     description: 'Компания злобных садовых гномов',
     level: 4, treasures: 1, levelsGained: 1, badStuff: 'Утащили экипировку с головы.',
+    badStuffEffect: { kind: 'lose-equipment-slot', slot: 'head' },
   },
   {
     id: 'm4', name: 'Гарпии', type: 'monster', deck: 'door',
     description: 'Крылатые создания с отвратительным голосом',
     level: 6, treasures: 2, levelsGained: 1, badStuff: 'Оглушили пением. Потеряй 2 уровня.',
+    badStuffEffect: { kind: 'lose-levels', levels: 2 },
   },
   {
     id: 'm5', name: 'Нос-о-Рог', type: 'monster', deck: 'door',
     description: 'Огромный носорог с бронированной шкурой',
     level: 8, treasures: 2, levelsGained: 1, badStuff: 'Растоптал! Потеряй 2 уровня.',
+    badStuffEffect: { kind: 'lose-levels', levels: 2 },
   },
   {
     id: 'm6', name: 'Огнедышащий Хомяк', type: 'monster', deck: 'door',
     description: 'Милый, пока не откроет рот',
     level: 3, treasures: 1, levelsGained: 1, badStuff: 'Подпалил бороду. Потеряй 1 уровень.',
+    badStuffEffect: { kind: 'lose-levels', levels: 1 },
   },
   {
     id: 'm7', name: 'Амазонки', type: 'monster', deck: 'door',
     description: 'Отряд воинственных женщин',
     level: 8, treasures: 2, levelsGained: 1, badStuff: 'Захватили в плен! Потеряй все карты в руке.',
+    badStuffEffect: { kind: 'lose-hand' },
   },
   {
     id: 'm8', name: 'Скелет', type: 'monster', deck: 'door',
     description: 'Костяной воин из подземелья',
-    level: 2, treasures: 1, levelsGained: 1, badStuff: 'Поцарапал костью. Потеряй 1 уровень.', undead: true,
+    level: 2, treasures: 1, levelsGained: 1, badStuff: 'Поцарапал костью. Потеряй 1 уровень.',
+    badStuffEffect: { kind: 'lose-levels', levels: 1 }, undead: true,
   },
   {
     id: 'm9', name: 'Зомби', type: 'monster', deck: 'door',
     description: 'Медленный, но настойчивый',
-    level: 4, treasures: 1, levelsGained: 1, badStuff: 'Заразил! Потеряй 1 уровень.', undead: true,
+    level: 4, treasures: 1, levelsGained: 1, badStuff: 'Заразил! Потеряй 1 уровень.',
+    badStuffEffect: { kind: 'lose-levels', levels: 1 }, undead: true,
   },
   {
     id: 'm10', name: 'Дракон', type: 'monster', deck: 'door',
     description: 'Огромный огнедышащий ящер',
     level: 14, treasures: 4, levelsGained: 2, badStuff: 'Испепелил! Потеряй всю экипировку.',
+    badStuffEffect: { kind: 'lose-all-equipment' },
   },
   {
     id: 'm11', name: 'Тролль', type: 'monster', deck: 'door',
     description: 'Огромный и тупой, но очень сильный',
     level: 10, treasures: 3, levelsGained: 1, badStuff: 'Сломал ноги! Потеряй обувь.',
+    badStuffEffect: { kind: 'lose-equipment-slot', slot: 'feet' },
   },
   {
     id: 'm12', name: 'Медуза Горгона', type: 'monster', deck: 'door',
     description: 'Не смотри ей в глаза!',
     level: 10, treasures: 2, levelsGained: 1, badStuff: 'Окаменел на 1 ход. Пропусти ход.',
+    badStuffEffect: { kind: 'skip-turn' },
   },
   {
     id: 'm13', name: 'Бродячий Мим', type: 'monster', deck: 'door',
     description: 'Молчаливый, но смертельно скучный',
     level: 1, treasures: 1, levelsGained: 1, badStuff: 'Нагнал тоску. Потеряй 1 уровень.',
+    badStuffEffect: { kind: 'lose-levels', levels: 1 },
   },
   {
     id: 'm14', name: 'Зловещий Туман', type: 'monster', deck: 'door',
     description: 'Пронизывает до костей',
     level: 6, treasures: 2, levelsGained: 1, badStuff: 'Простыл. Потеряй 1 уровень.',
+    badStuffEffect: { kind: 'lose-levels', levels: 1 },
   },
   {
     id: 'm15', name: 'Каменный Голем', type: 'monster', deck: 'door',
     description: 'Ходячая каменная глыба',
     level: 12, treasures: 3, levelsGained: 1, badStuff: 'Раздавил! Потеряй 3 уровня.',
+    badStuffEffect: { kind: 'lose-levels', levels: 3 },
   },
 ];
 
