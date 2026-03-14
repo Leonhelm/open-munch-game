@@ -491,9 +491,7 @@ export class GameBoardComponent {
     this.audioService.play('card-draw');
     this.gameState.kickDoor();
     const s = this.state();
-    if (s?.turnPhase === 'combat') {
-      this.audioService.play('combat-win'); // Not really win, just entering combat — use different cue
-    } else if (s?.log.slice(-1)[0]?.type === 'curse') {
+    if (s?.log.slice(-1)[0]?.type === 'curse') {
       this.audioService.play('curse');
     }
   }
