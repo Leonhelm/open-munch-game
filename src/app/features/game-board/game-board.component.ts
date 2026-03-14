@@ -48,20 +48,41 @@ import { getCombatStrength, Card } from '../../core/models';
               @switch (s.turnPhase) {
                 @case ('kick-door') {
                   <button class="action-btn" (click)="kickDoor()">Выбить дверь</button>
+                  @if (canBackstab()) {
+                    <div class="backstab-section">
+                      <div class="backstab-title">Удар в спину (кража карты):</div>
+                      @for (p of backstabTargets(); track p.id) {
+                        <button class="backstab-btn" (click)="backstab(p.id)">{{ p.name }} ({{ p.hand.length }} карт)</button>
+                      }
+                    </div>
+                  }
                 }
                 @case ('combat') {
                   @if (s.combat) {
                     <app-combat
                       [combat]="s.combat"
                       [player]="s.players[s.currentPlayerIndex]!"
+                      [allPlayers]="s.players"
                       (fight)="fight()"
                       (run)="runAway()"
                       (useItem)="useItem($event)"
+                      (berserk)="warriorBerserk($event)"
+                      (wizardEscape)="wizardCharm($event)"
+                      (askHelp)="askForHelp($event)"
+                      (removeHelper)="removeHelper()"
                     />
                   }
                 }
                 @case ('loot-room') {
                   <button class="action-btn" (click)="lootRoom()">Обыскать комнату</button>
+                  @if (canBackstab()) {
+                    <div class="backstab-section">
+                      <div class="backstab-title">Удар в спину (кража карты):</div>
+                      @for (p of backstabTargets(); track p.id) {
+                        <button class="backstab-btn" (click)="backstab(p.id)">{{ p.name }} ({{ p.hand.length }} карт)</button>
+                      }
+                    </div>
+                  }
                 }
                 @case ('charity') {
                   @if (charityInfo(); as info) {
@@ -70,7 +91,7 @@ import { getCombatStrength, Card } from '../../core/models';
                     }
                     @if (selectedForSale().length > 0) {
                       <div class="sell-info">
-                        <span>Продажа: {{ selectedGoldTotal() }} золота</span>
+                        <span>Продажа: {{ selectedGoldTotal() }} золота{{ isHalfling() ? ' (x2 Халфлинг!)' : '' }}</span>
                         <button class="action-btn sell-btn" (click)="sellSelected()">Продать</button>
                       </div>
                     }
@@ -201,6 +222,17 @@ import { getCombatStrength, Card } from '../../core/models';
     .sell-btn { padding: 6px 16px; font-size: 14px; background: #2e7d32; }
     .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .bot-turn { text-align: center; padding: 20px; color: #666; }
+    .backstab-section { margin: 8px 0; text-align: center; }
+    .backstab-title { font-size: 12px; margin-bottom: 4px; color: #6a1b9a; }
+    .backstab-btn {
+      margin: 2px 4px;
+      padding: 4px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      background: #f3e5f5;
+      border: 1px solid #6a1b9a;
+      border-radius: 4px;
+    }
     .victory-overlay {
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;
@@ -291,9 +323,30 @@ export class GameBoardComponent {
     if (!s) return 0;
     const p = s.players[s.currentPlayerIndex]!;
     const ids = new Set(this.selectedForSale());
-    return p.hand
+    const baseGold = p.hand
       .filter(c => ids.has(c.id))
       .reduce((sum, c) => sum + ('goldValue' in c ? (c as { goldValue: number }).goldValue : 0), 0);
+    return p.raceName === 'halfling' ? baseGold * 2 : baseGold;
+  });
+
+  readonly isHalfling = computed(() => {
+    const s = this.state();
+    if (!s) return false;
+    return s.players[s.currentPlayerIndex]?.raceName === 'halfling';
+  });
+
+  readonly canBackstab = computed(() => {
+    const s = this.state();
+    if (!s) return false;
+    const p = s.players[s.currentPlayerIndex]!;
+    return p.className === 'thief' && !s.thiefBackstabUsed && s.turnPhase !== 'combat';
+  });
+
+  readonly backstabTargets = computed(() => {
+    const s = this.state();
+    if (!s) return [];
+    const currentId = s.players[s.currentPlayerIndex]!.id;
+    return s.players.filter(p => p.id !== currentId && p.hand.length > 0);
   });
 
   readonly phaseLabel = computed(() => {
@@ -331,6 +384,26 @@ export class GameBoardComponent {
     this.gameState.useOneShotInCombat(cardId);
   }
 
+  warriorBerserk(cardId: string): void {
+    this.gameState.warriorBerserk(cardId);
+  }
+
+  wizardCharm(cardIds: string[]): void {
+    this.gameState.wizardCharm(cardIds);
+  }
+
+  backstab(targetId: string): void {
+    this.gameState.thiefBackstab(targetId);
+  }
+
+  askForHelp(helperId: string): void {
+    this.gameState.askForHelp(helperId);
+  }
+
+  removeHelper(): void {
+    this.gameState.removeHelper();
+  }
+
   lootRoom(): void {
     this.gameState.lootRoom();
   }
@@ -338,13 +411,11 @@ export class GameBoardComponent {
   playCard(cardId: string): void {
     const s = this.state();
     if (s?.turnPhase === 'charity') {
-      // In charity phase, clicking a card either discards it or toggles sell selection
       const info = this.charityInfo();
       if (info && info.excess > 0) {
         this.gameState.discardFromHand(cardId);
         return;
       }
-      // Toggle sell selection
       const current = this.selectedForSale();
       if (current.includes(cardId)) {
         this.selectedForSale.set(current.filter(id => id !== cardId));

@@ -385,4 +385,406 @@ describe('GameStateService', () => {
       }
     });
   });
+
+  // --- Helper to set up a controlled combat scenario ---
+  function setupCombatWithMonster(
+    svc: GameStateService,
+    monsterOverrides: Partial<MonsterCard> = {},
+    playerOverrides: Partial<Player> = {},
+  ): void {
+    svc.startGame(3);
+    // Keep trying until we get into combat
+    let attempts = 0;
+    while (attempts < 50) {
+      svc.startGame(3);
+      const card = svc.kickDoor();
+      if (card?.type === 'monster') break;
+      attempts++;
+    }
+    const state = svc.getState()!;
+    if (!state.combat) return;
+
+    // Patch state via private access for controlled testing
+    const stateSignal = (svc as any)._state;
+    const s = stateSignal();
+    if (!s) return;
+
+    const monster: MonsterCard = { ...s.combat!.monster, ...monsterOverrides } as MonsterCard;
+    const player = { ...s.players[s.currentPlayerIndex]!, ...playerOverrides };
+    const players = s.players.map((p: Player, i: number) =>
+      i === s.currentPlayerIndex ? player : p
+    );
+
+    stateSignal.set({
+      ...s,
+      players,
+      combat: { ...s.combat!, monster },
+    });
+  }
+
+  describe('cleric ability', () => {
+    it('should add +3 combat strength vs undead monsters', () => {
+      setupCombatWithMonster(service, { undead: true }, { className: 'cleric' });
+      const state = service.getState()!;
+      if (!state.combat) return;
+
+      const strength = service.getPlayerCombatStrength(state);
+      const player = state.players[state.currentPlayerIndex]!;
+      // Cleric bonus (+3) should be included
+      const baseStrength = player.level +
+        (player.equipment.head?.bonus ?? 0) + (player.equipment.body?.bonus ?? 0) +
+        (player.equipment.feet?.bonus ?? 0) + (player.equipment.handLeft?.bonus ?? 0) +
+        (player.equipment.handRight?.bonus ?? 0) +
+        state.combat.playerBonuses.reduce((sum, c) => sum + c.bonus, 0) +
+        state.combat.warriorBonuses;
+      expect(strength).toBe(baseStrength + 3);
+    });
+
+    it('should NOT add bonus vs non-undead monsters', () => {
+      setupCombatWithMonster(service, { undead: undefined }, { className: 'cleric' });
+      const state = service.getState()!;
+      if (!state.combat) return;
+
+      const strength = service.getPlayerCombatStrength(state);
+      const player = state.players[state.currentPlayerIndex]!;
+      const baseStrength = player.level +
+        (player.equipment.head?.bonus ?? 0) + (player.equipment.body?.bonus ?? 0) +
+        (player.equipment.feet?.bonus ?? 0) + (player.equipment.handLeft?.bonus ?? 0) +
+        (player.equipment.handRight?.bonus ?? 0) +
+        state.combat.playerBonuses.reduce((sum, c) => sum + c.bonus, 0) +
+        state.combat.warriorBonuses;
+      expect(strength).toBe(baseStrength);
+    });
+  });
+
+  describe('elf ability', () => {
+    it('should gain +1 bonus level when winning combat', () => {
+      // Set up combat where elf can win (very weak monster)
+      setupCombatWithMonster(
+        service,
+        { level: 1, levelsGained: 1, treasures: 1, undead: undefined },
+        { raceName: 'elf', level: 5 },
+      );
+      const state = service.getState()!;
+      if (!state.combat) return;
+
+      const levelBefore = state.players[state.currentPlayerIndex]!.level;
+      const result = service.resolveCombat();
+      if (result.won) {
+        const after = service.getState()!;
+        // Should gain levelsGained (1) + elf bonus (1) = 2
+        expect(after.players[state.currentPlayerIndex]!.level).toBe(levelBefore + 2);
+        expect(after.log.some(l => l.includes('Эльф'))).toBe(true);
+      }
+    });
+  });
+
+  describe('halfling ability', () => {
+    it('should get double gold when selling cards', () => {
+      service.startGame(3);
+      const stateSignal = (service as any)._state;
+      const s = stateSignal();
+      if (!s) return;
+
+      // Give player a card worth 500 gold and make them halfling
+      const testCard: OneShotCard = {
+        id: 'test-sell-1',
+        name: 'Test Item',
+        type: 'one-shot',
+        deck: 'treasure',
+        description: 'test',
+        bonus: 1,
+        usableInCombat: true,
+        goldValue: 500,
+      };
+
+      const player = { ...s.players[0]!, raceName: 'halfling' as const, hand: [...s.players[0]!.hand, testCard] };
+      const players = s.players.map((p: Player, i: number) => i === 0 ? player : p);
+      stateSignal.set({ ...s, players, turnPhase: 'charity' });
+
+      const levelBefore = service.getState()!.players[0]!.level;
+      const result = service.sellCards([testCard.id]);
+      // 500 gold * 2 (halfling) = 1000 = 1 level
+      expect(result).toBe(true);
+      expect(service.getState()!.players[0]!.level).toBe(levelBefore + 1);
+      expect(service.getState()!.log.some(l => l.includes('Халфлинг'))).toBe(true);
+    });
+  });
+
+  describe('warrior berserk', () => {
+    it('should allow warrior to discard card for +1 in combat', () => {
+      setupCombatWithMonster(service, {}, { className: 'warrior' });
+      const state = service.getState()!;
+      if (!state.combat) return;
+
+      const player = state.players[state.currentPlayerIndex]!;
+      if (player.hand.length === 0) return;
+
+      const card = player.hand[0]!;
+      const result = service.warriorBerserk(card.id);
+      expect(result).toBe(true);
+
+      const after = service.getState()!;
+      expect(after.combat!.warriorBonuses).toBe(1);
+      expect(after.players[after.currentPlayerIndex]!.hand.find(c => c.id === card.id)).toBeUndefined();
+    });
+
+    it('should NOT allow non-warrior to use berserk', () => {
+      setupCombatWithMonster(service, {}, { className: 'wizard' });
+      const state = service.getState()!;
+      if (!state.combat) return;
+
+      const player = state.players[state.currentPlayerIndex]!;
+      if (player.hand.length === 0) return;
+
+      const result = service.warriorBerserk(player.hand[0]!.id);
+      expect(result).toBe(false);
+    });
+
+    it('should NOT work outside of combat', () => {
+      service.startGame(3);
+      const stateSignal = (service as any)._state;
+      const s = stateSignal();
+      const player = { ...s.players[0]!, className: 'warrior' as const };
+      const players = s.players.map((p: Player, i: number) => i === 0 ? player : p);
+      stateSignal.set({ ...s, players });
+
+      if (s.players[0]!.hand.length > 0) {
+        const result = service.warriorBerserk(s.players[0]!.hand[0]!.id);
+        expect(result).toBe(false);
+      }
+    });
+  });
+
+  describe('wizard charm', () => {
+    it('should allow wizard to auto-escape by discarding 3 cards', () => {
+      setupCombatWithMonster(service, {}, { className: 'wizard' });
+      const state = service.getState()!;
+      if (!state.combat) return;
+
+      const player = state.players[state.currentPlayerIndex]!;
+      if (player.hand.length < 3) return;
+
+      const cardIds = player.hand.slice(0, 3).map(c => c.id);
+      const result = service.wizardCharm(cardIds);
+      expect(result).toBe(true);
+
+      const after = service.getState()!;
+      expect(after.combat).toBeNull();
+      expect(after.turnPhase).toBe('charity');
+      expect(after.log.some(l => l.includes('Чары'))).toBe(true);
+      // Cards should be removed from hand
+      for (const id of cardIds) {
+        expect(after.players[after.currentPlayerIndex]!.hand.find(c => c.id === id)).toBeUndefined();
+      }
+    });
+
+    it('should NOT allow non-wizard to use charm', () => {
+      setupCombatWithMonster(service, {}, { className: 'warrior' });
+      const state = service.getState()!;
+      if (!state.combat) return;
+
+      const player = state.players[state.currentPlayerIndex]!;
+      if (player.hand.length < 3) return;
+
+      const cardIds = player.hand.slice(0, 3).map(c => c.id);
+      const result = service.wizardCharm(cardIds);
+      expect(result).toBe(false);
+    });
+
+    it('should require exactly 3 cards', () => {
+      setupCombatWithMonster(service, {}, { className: 'wizard' });
+      const state = service.getState()!;
+      if (!state.combat) return;
+
+      const player = state.players[state.currentPlayerIndex]!;
+      if (player.hand.length < 2) return;
+
+      const result = service.wizardCharm(player.hand.slice(0, 2).map(c => c.id));
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('thief backstab', () => {
+    it('should allow thief to attempt stealing a card', () => {
+      service.startGame(3);
+      const stateSignal = (service as any)._state;
+      const s = stateSignal();
+
+      const player = { ...s.players[0]!, className: 'thief' as const };
+      const players = s.players.map((p: Player, i: number) => i === 0 ? player : p);
+      stateSignal.set({ ...s, players });
+
+      const target = service.getState()!.players[1]!;
+      if (target.hand.length === 0) return;
+
+      const result = service.thiefBackstab(target.id);
+      expect(result.attempted).toBe(true);
+      expect(service.getState()!.thiefBackstabUsed).toBe(true);
+    });
+
+    it('should NOT allow non-thief to backstab', () => {
+      service.startGame(3);
+      const target = service.getState()!.players[1]!;
+      const result = service.thiefBackstab(target.id);
+      expect(result.attempted).toBe(false);
+    });
+
+    it('should NOT allow backstab twice in one turn', () => {
+      service.startGame(3);
+      const stateSignal = (service as any)._state;
+      const s = stateSignal();
+
+      const player = { ...s.players[0]!, className: 'thief' as const };
+      const players = s.players.map((p: Player, i: number) => i === 0 ? player : p);
+      stateSignal.set({ ...s, players });
+
+      const target = service.getState()!.players[1]!;
+      if (target.hand.length === 0) return;
+
+      service.thiefBackstab(target.id);
+      const result2 = service.thiefBackstab(target.id);
+      expect(result2.attempted).toBe(false);
+    });
+
+    it('should reset backstab usage on end turn', () => {
+      service.startGame(3);
+      const stateSignal = (service as any)._state;
+      const s = stateSignal();
+
+      const player = { ...s.players[0]!, className: 'thief' as const };
+      const players = s.players.map((p: Player, i: number) => i === 0 ? player : p);
+      stateSignal.set({ ...s, players });
+
+      const target = service.getState()!.players[1]!;
+      if (target.hand.length > 0) {
+        service.thiefBackstab(target.id);
+        expect(service.getState()!.thiefBackstabUsed).toBe(true);
+      }
+
+      service.endTurn();
+      expect(service.getState()!.thiefBackstabUsed).toBe(false);
+    });
+
+    it('should NOT allow backstab on self', () => {
+      service.startGame(3);
+      const stateSignal = (service as any)._state;
+      const s = stateSignal();
+
+      const player = { ...s.players[0]!, className: 'thief' as const };
+      const players = s.players.map((p: Player, i: number) => i === 0 ? player : p);
+      stateSignal.set({ ...s, players });
+
+      const result = service.thiefBackstab(player.id);
+      expect(result.attempted).toBe(false);
+    });
+  });
+
+  describe('combat helper system', () => {
+    it('should allow asking for help', () => {
+      setupCombatWithMonster(service, {}, {});
+      const state = service.getState()!;
+      if (!state.combat) return;
+
+      const helperId = state.players[1]!.id;
+      const result = service.askForHelp(helperId);
+      expect(result).toBe(true);
+      expect(service.getState()!.combat!.helperId).toBe(helperId);
+    });
+
+    it('should NOT allow asking self for help', () => {
+      setupCombatWithMonster(service, {}, {});
+      const state = service.getState()!;
+      if (!state.combat) return;
+
+      const selfId = state.players[state.currentPlayerIndex]!.id;
+      const result = service.askForHelp(selfId);
+      expect(result).toBe(false);
+    });
+
+    it('should NOT allow second helper', () => {
+      setupCombatWithMonster(service, {}, {});
+      const state = service.getState()!;
+      if (!state.combat) return;
+
+      service.askForHelp(state.players[1]!.id);
+      const result = service.askForHelp(state.players[2]!.id);
+      expect(result).toBe(false);
+    });
+
+    it('should remove helper', () => {
+      setupCombatWithMonster(service, {}, {});
+      const state = service.getState()!;
+      if (!state.combat) return;
+
+      service.askForHelp(state.players[1]!.id);
+      expect(service.getState()!.combat!.helperId).toBeTruthy();
+
+      service.removeHelper();
+      expect(service.getState()!.combat!.helperId).toBeNull();
+      expect(service.getState()!.combat!.helperBonuses.length).toBe(0);
+    });
+
+    it('should add helper strength to combat', () => {
+      setupCombatWithMonster(service, {}, {});
+      const state = service.getState()!;
+      if (!state.combat) return;
+
+      const strengthBefore = service.getPlayerCombatStrength(state);
+      service.askForHelp(state.players[1]!.id);
+      const strengthAfter = service.getPlayerCombatStrength(service.getState()!);
+
+      // Helper adds their combat strength
+      expect(strengthAfter).toBeGreaterThan(strengthBefore);
+    });
+
+    it('should allow helper to use one-shot cards', () => {
+      setupCombatWithMonster(service, {}, {});
+      const state = service.getState()!;
+      if (!state.combat) return;
+
+      const helper = state.players[1]!;
+      service.askForHelp(helper.id);
+
+      const oneShot = helper.hand.find(c => c.type === 'one-shot');
+      if (oneShot) {
+        const result = service.helperUseOneShot(oneShot.id);
+        expect(result).toBe(true);
+        const after = service.getState()!;
+        expect(after.combat!.helperBonuses.length).toBe(1);
+      }
+    });
+
+    it('should NOT allow helper one-shot without helper', () => {
+      setupCombatWithMonster(service, {}, {});
+      const state = service.getState()!;
+      if (!state.combat) return;
+
+      const result = service.helperUseOneShot('fake-id');
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('getPlayerCombatStrength', () => {
+    it('should return 0 when no combat', () => {
+      service.startGame(3);
+      const state = service.getState()!;
+      expect(service.getPlayerCombatStrength(state)).toBe(0);
+    });
+
+    it('should include warrior berserk bonuses', () => {
+      setupCombatWithMonster(service, {}, { className: 'warrior' });
+      const state = service.getState()!;
+      if (!state.combat) return;
+
+      const player = state.players[state.currentPlayerIndex]!;
+      if (player.hand.length === 0) return;
+
+      const strengthBefore = service.getPlayerCombatStrength(state);
+      service.warriorBerserk(player.hand[0]!.id);
+      const strengthAfter = service.getPlayerCombatStrength(service.getState()!);
+
+      expect(strengthAfter).toBe(strengthBefore + 1);
+    });
+  });
 });

@@ -14,6 +14,7 @@ export interface CombatState {
   readonly monsterBonuses: number;
   readonly helperId: string | null;
   readonly helperBonuses: readonly OneShotCard[];
+  readonly warriorBonuses: number;
 }
 
 export interface GameState {
@@ -27,6 +28,7 @@ export interface GameState {
   readonly combat: CombatState | null;
   readonly log: readonly string[];
   readonly winnerId: string | null;
+  readonly thiefBackstabUsed: boolean;
 }
 
 export function getCurrentPlayer(state: GameState): Player {

@@ -2,7 +2,7 @@ import { computed, Injectable, signal } from '@angular/core';
 import {
   BadStuffEffect, Card, CombatState, CurseCard, CurseEffect, DoorCard,
   EquipmentCard, GameState, MonsterCard, OneShotCard, Player, TurnPhase,
-  createPlayer, TreasureCard, EMPTY_EQUIPMENT,
+  createPlayer, TreasureCard, EMPTY_EQUIPMENT, getClassCombatBonus, getCombatStrength,
 } from '../models';
 import { DeckService, Deck } from './deck.service';
 import { EquipmentService } from './equipment.service';
@@ -62,6 +62,7 @@ export class GameStateService {
       combat: null,
       log: ['Игра началась!'],
       winnerId: null,
+      thiefBackstabUsed: false,
     });
   }
 
@@ -80,6 +81,7 @@ export class GameStateService {
             monsterBonuses: 0,
             helperId: null,
             helperBonuses: [],
+            warriorBonuses: 0,
           },
           log: [...state.log, `${this.getCurrentPlayerName(state)} выбил дверь и встретил ${card.name} (уровень ${card.level})!`],
         };
@@ -138,15 +140,32 @@ export class GameStateService {
     });
   }
 
+  getPlayerCombatStrength(state: GameState): number {
+    if (!state.combat) return 0;
+    const player = state.players[state.currentPlayerIndex]!;
+    let strength = player.level +
+      this.getEquipmentBonus(player) +
+      state.combat.playerBonuses.reduce((sum, c) => sum + c.bonus, 0) +
+      getClassCombatBonus(player, state.combat.monster) +
+      state.combat.warriorBonuses;
+
+    // Add helper strength
+    if (state.combat.helperId) {
+      const helper = state.players.find(p => p.id === state.combat!.helperId);
+      if (helper) {
+        strength += getCombatStrength(helper) +
+          state.combat.helperBonuses.reduce((sum, c) => sum + c.bonus, 0);
+      }
+    }
+
+    return strength;
+  }
+
   resolveCombat(): { won: boolean; ranAway?: boolean } {
     const state = this._state();
     if (!state?.combat) return { won: false };
 
-    const player = state.players[state.currentPlayerIndex]!;
-    const playerStrength = player.level +
-      this.getEquipmentBonus(player) +
-      state.combat.playerBonuses.reduce((sum, c) => sum + c.bonus, 0);
-
+    const playerStrength = this.getPlayerCombatStrength(state);
     const monsterStrength = state.combat.monster.level + state.combat.monsterBonuses;
 
     if (playerStrength > monsterStrength) {
@@ -202,6 +221,7 @@ export class GameStateService {
         currentPlayerIndex: nextIndex,
         turnPhase: 'kick-door' as TurnPhase,
         combat: null,
+        thiefBackstabUsed: false,
         log: [...s.log, `Ход переходит к ${s.players[nextIndex]!.name}`],
       };
     });
@@ -303,7 +323,8 @@ export class GameStateService {
       return sum;
     }, 0);
 
-    const levelsGained = Math.floor(totalGold / 1000);
+    const effectiveGold = player.raceName === 'halfling' ? totalGold * 2 : totalGold;
+    const levelsGained = Math.floor(effectiveGold / 1000);
     if (levelsGained === 0 && cardsToSell.length === 0) return false;
 
     this.updateState(s => {
@@ -327,8 +348,8 @@ export class GameStateService {
         doorDiscard: [...s.doorDiscard, ...doorDiscards],
         treasureDiscard: [...s.treasureDiscard, ...treasureDiscards],
         log: levelsGained > 0
-          ? [...s.log, `${this.getCurrentPlayerName(s)} продал карты за ${totalGold} золота и получил ${levelsGained} уровень!`]
-          : [...s.log, `${this.getCurrentPlayerName(s)} продал карты за ${totalGold} золота (недостаточно для уровня)`],
+          ? [...s.log, `${this.getCurrentPlayerName(s)} продал карты за ${effectiveGold} золота и получил ${levelsGained} уровень!${player.raceName === 'halfling' ? ' (Халфлинг: двойная цена!)' : ''}`]
+          : [...s.log, `${this.getCurrentPlayerName(s)} продал карты за ${effectiveGold} золота (недостаточно для уровня)`],
       };
 
       if (levelsGained > 0) {
@@ -340,6 +361,184 @@ export class GameStateService {
     return levelsGained > 0;
   }
 
+  warriorBerserk(cardId: string): boolean {
+    const state = this._state();
+    if (!state?.combat) return false;
+
+    const player = state.players[state.currentPlayerIndex]!;
+    if (player.className !== 'warrior') return false;
+
+    const card = player.hand.find(c => c.id === cardId);
+    if (!card) return false;
+
+    this.updateState(s => {
+      if (!s.combat) return s;
+      const players = this.updateCurrentPlayerHand(s, hand => hand.filter(c => c.id !== cardId));
+
+      const doorDiscards = card.deck === 'door' ? [card as DoorCard] : [];
+      const treasureDiscards = card.deck === 'treasure' ? [card as TreasureCard] : [];
+
+      return {
+        ...s,
+        players,
+        combat: { ...s.combat, warriorBonuses: s.combat.warriorBonuses + 1 },
+        doorDiscard: [...s.doorDiscard, ...doorDiscards],
+        treasureDiscard: [...s.treasureDiscard, ...treasureDiscards],
+        log: [...s.log, `${this.getCurrentPlayerName(s)} использовал Берсерк, сбросив ${card.name} для +1!`],
+      };
+    });
+    return true;
+  }
+
+  wizardCharm(cardIds: string[]): boolean {
+    const state = this._state();
+    if (!state?.combat) return false;
+
+    const player = state.players[state.currentPlayerIndex]!;
+    if (player.className !== 'wizard') return false;
+    if (cardIds.length !== 3) return false;
+
+    const cards = cardIds.map(id => player.hand.find(c => c.id === id)).filter((c): c is Card => c !== undefined);
+    if (cards.length !== 3) return false;
+
+    this.updateState(s => {
+      if (!s.combat) return s;
+      const discardIds = new Set(cardIds);
+      const players = this.updateCurrentPlayerHand(s, hand => hand.filter(c => !discardIds.has(c.id)));
+
+      const doorDiscards = cards.filter(c => c.deck === 'door') as DoorCard[];
+      const treasureDiscards = cards.filter(c => c.deck === 'treasure') as TreasureCard[];
+
+      return {
+        ...s,
+        players,
+        combat: null,
+        turnPhase: 'charity' as TurnPhase,
+        doorDiscard: [...s.doorDiscard, ...doorDiscards],
+        treasureDiscard: [...s.treasureDiscard, ...treasureDiscards],
+        log: [...s.log, `${this.getCurrentPlayerName(s)} использовал Чары и автоматически сбежал!`],
+      };
+    });
+    return true;
+  }
+
+  thiefBackstab(targetPlayerId: string): { success: boolean; attempted: boolean } {
+    const state = this._state();
+    if (!state) return { success: false, attempted: false };
+
+    const player = state.players[state.currentPlayerIndex]!;
+    if (player.className !== 'thief') return { success: false, attempted: false };
+    if (state.thiefBackstabUsed) return { success: false, attempted: false };
+    if (state.turnPhase === 'combat') return { success: false, attempted: false };
+
+    const target = state.players.find(p => p.id === targetPlayerId);
+    if (!target || target.id === player.id || target.hand.length === 0) return { success: false, attempted: false };
+
+    const diceRoll = Math.floor(Math.random() * 6) + 1;
+    const success = diceRoll >= 4;
+
+    this.updateState(s => {
+      const targetPlayer = s.players.find(p => p.id === targetPlayerId)!;
+
+      if (success) {
+        const stolenIndex = Math.floor(Math.random() * targetPlayer.hand.length);
+        const stolenCard = targetPlayer.hand[stolenIndex]!;
+
+        const players = s.players.map((p, i) => {
+          if (p.id === targetPlayerId) {
+            return { ...p, hand: p.hand.filter((_, idx) => idx !== stolenIndex) };
+          }
+          if (i === s.currentPlayerIndex) {
+            return { ...p, hand: [...p.hand, stolenCard] };
+          }
+          return p;
+        });
+
+        return {
+          ...s,
+          players,
+          thiefBackstabUsed: true,
+          log: [...s.log, `${this.getCurrentPlayerName(s)} бросил ${diceRoll} и украл карту у ${targetPlayer.name}!`],
+        };
+      } else {
+        const players = s.players.map((p, i) => {
+          if (i === s.currentPlayerIndex) {
+            return { ...p, level: Math.max(1, p.level - 1) };
+          }
+          return p;
+        });
+
+        return {
+          ...s,
+          players,
+          thiefBackstabUsed: true,
+          log: [...s.log, `${this.getCurrentPlayerName(s)} бросил ${diceRoll} и провалил кражу у ${targetPlayer.name}! -1 уровень`],
+        };
+      }
+    });
+
+    return { success, attempted: true };
+  }
+
+  askForHelp(helperId: string): boolean {
+    const state = this._state();
+    if (!state?.combat) return false;
+    if (state.combat.helperId) return false;
+
+    const helper = state.players.find(p => p.id === helperId);
+    if (!helper || helper.id === state.players[state.currentPlayerIndex]!.id) return false;
+
+    this.updateState(s => {
+      if (!s.combat) return s;
+      return {
+        ...s,
+        combat: { ...s.combat, helperId },
+        log: [...s.log, `${this.getCurrentPlayerName(s)} попросил помощи у ${helper.name}!`],
+      };
+    });
+    return true;
+  }
+
+  removeHelper(): void {
+    this.updateState(s => {
+      if (!s.combat || !s.combat.helperId) return s;
+      return {
+        ...s,
+        combat: { ...s.combat, helperId: null, helperBonuses: [] },
+      };
+    });
+  }
+
+  helperUseOneShot(cardId: string): boolean {
+    const state = this._state();
+    if (!state?.combat?.helperId) return false;
+
+    const helper = state.players.find(p => p.id === state.combat!.helperId);
+    if (!helper) return false;
+
+    const card = helper.hand.find(c => c.id === cardId);
+    if (!card || card.type !== 'one-shot') return false;
+
+    this.updateState(s => {
+      if (!s.combat?.helperId) return s;
+      const players = s.players.map(p => {
+        if (p.id === s.combat!.helperId) {
+          return { ...p, hand: p.hand.filter(c => c.id !== cardId) };
+        }
+        return p;
+      });
+      return {
+        ...s,
+        players,
+        combat: {
+          ...s.combat,
+          helperBonuses: [...s.combat.helperBonuses, card as OneShotCard],
+        },
+      };
+    });
+    return true;
+  }
+
   getState(): GameState | null {
     return this._state();
   }
@@ -349,30 +548,63 @@ export class GameStateService {
       if (!state.combat) return state;
 
       const monster = state.combat.monster;
-      const levelsGained = monster.levelsGained;
+      const player = state.players[state.currentPlayerIndex]!;
+      const elfBonus = player.raceName === 'elf' ? 1 : 0;
+      const levelsGained = monster.levelsGained + elfBonus;
       const treasureCount = monster.treasures;
 
-      const treasures: Card[] = [];
+      const allTreasures: Card[] = [];
       for (let i = 0; i < treasureCount; i++) {
         const t = this.deckService.draw(this.treasureDeck);
-        if (t) treasures.push(t);
+        if (t) allTreasures.push(t);
+      }
+
+      // Split treasures between fighter and helper
+      let playerTreasures: Card[];
+      let helperTreasures: Card[] = [];
+      if (state.combat.helperId) {
+        const playerCount = Math.ceil(allTreasures.length / 2);
+        playerTreasures = allTreasures.slice(0, playerCount);
+        helperTreasures = allTreasures.slice(playerCount);
+      } else {
+        playerTreasures = allTreasures;
       }
 
       const players = state.players.map((p, i) => {
-        if (i !== state.currentPlayerIndex) return p;
-        return {
-          ...p,
-          level: p.level + levelsGained,
-          hand: [...p.hand, ...treasures],
-        };
+        if (i === state.currentPlayerIndex) {
+          return {
+            ...p,
+            level: p.level + levelsGained,
+            hand: [...p.hand, ...playerTreasures],
+          };
+        }
+        // Helper gets their share of treasures (no levels)
+        if (state.combat!.helperId && p.id === state.combat!.helperId && helperTreasures.length > 0) {
+          return {
+            ...p,
+            hand: [...p.hand, ...helperTreasures],
+          };
+        }
+        return p;
       });
+
+      const logMessages = [...state.log, `${this.getCurrentPlayerName(state)} победил ${monster.name}! +${levelsGained} уровень, +${treasureCount} сокровищ`];
+      if (elfBonus > 0) {
+        logMessages.push(`Эльф получает +1 бонусный уровень за победу!`);
+      }
+      if (state.combat.helperId) {
+        const helper = state.players.find(p => p.id === state.combat!.helperId);
+        if (helper) {
+          logMessages.push(`${helper.name} получает ${helperTreasures.length} сокровищ за помощь`);
+        }
+      }
 
       let newState: GameState = {
         ...state,
         players,
         turnPhase: 'charity' as TurnPhase,
         combat: null,
-        log: [...state.log, `${this.getCurrentPlayerName(state)} победил ${monster.name}! +${levelsGained} уровень, +${treasureCount} сокровищ`],
+        log: logMessages,
       };
 
       newState = this.checkWinCondition(newState);

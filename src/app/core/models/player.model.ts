@@ -1,4 +1,4 @@
-import { Card, ClassName, EquipmentCard, EquipmentSlot, RaceName } from './card.model';
+import { Card, ClassName, EquipmentCard, EquipmentSlot, MonsterCard, RaceName } from './card.model';
 
 export interface PlayerEquipment {
   readonly head: EquipmentCard | null;
@@ -53,6 +53,11 @@ export function getEquipmentBonus(equipment: PlayerEquipment): number {
 
 export function getCombatStrength(player: Player): number {
   return player.level + getEquipmentBonus(player.equipment);
+}
+
+export function getClassCombatBonus(player: Player, monster: MonsterCard): number {
+  if (player.className === 'cleric' && monster.undead) return 3;
+  return 0;
 }
 
 export function getEquippedSlot(equipment: PlayerEquipment, slot: EquipmentSlot): EquipmentCard | null {
