@@ -63,6 +63,7 @@ export class GameStateService {
       log: ['Игра началась!'],
       winnerId: null,
       thiefBackstabUsed: false,
+      skipTurnPlayerIds: [],
     });
   }
 
@@ -215,14 +216,26 @@ export class GameStateService {
     }
 
     this.updateState(s => {
-      const nextIndex = (s.currentPlayerIndex + 1) % s.players.length;
+      let nextIndex = (s.currentPlayerIndex + 1) % s.players.length;
+      let skipIds = s.skipTurnPlayerIds;
+      const logMessages = [...s.log];
+
+      // Skip players who must miss their turn
+      while (skipIds.includes(s.players[nextIndex]!.id)) {
+        logMessages.push(`${s.players[nextIndex]!.name} пропускает ход!`);
+        skipIds = skipIds.filter(id => id !== s.players[nextIndex]!.id);
+        nextIndex = (nextIndex + 1) % s.players.length;
+      }
+
+      logMessages.push(`Ход переходит к ${s.players[nextIndex]!.name}`);
       return {
         ...s,
         currentPlayerIndex: nextIndex,
         turnPhase: 'kick-door' as TurnPhase,
         combat: null,
         thiefBackstabUsed: false,
-        log: [...s.log, `Ход переходит к ${s.players[nextIndex]!.name}`],
+        skipTurnPlayerIds: skipIds,
+        log: logMessages,
       };
     });
     return true;
@@ -669,10 +682,10 @@ export class GameStateService {
       treasureDiscard: [...state.treasureDiscard, ...treasureDiscards],
     };
 
-    // Skip turn: advance currentPlayerIndex by 1 extra (will be advanced again in endTurn)
     if (skipNextTurn) {
       nextState = {
         ...nextState,
+        skipTurnPlayerIds: [...nextState.skipTurnPlayerIds, player.id],
         log: [...nextState.log, `${player.name} пропускает следующий ход!`],
       };
     }

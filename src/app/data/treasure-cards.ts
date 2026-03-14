@@ -104,6 +104,21 @@ const oneShots: OneShotCard[] = [
     description: '+4 в бою (одноразовое)',
     bonus: 4, usableInCombat: true, goldValue: 300,
   },
+  {
+    id: 'os6', name: 'Амулет Защиты', type: 'one-shot', deck: 'treasure',
+    description: '+1 в бою (одноразовое)',
+    bonus: 1, usableInCombat: true, goldValue: 150,
+  },
+  {
+    id: 'os7', name: 'Зелье Маны', type: 'one-shot', deck: 'treasure',
+    description: '+2 в бою (одноразовое)',
+    bonus: 2, usableInCombat: true, goldValue: 200,
+  },
+  {
+    id: 'os8', name: 'Огненный Шар', type: 'one-shot', deck: 'treasure',
+    description: '+3 в бою (одноразовое)',
+    bonus: 3, usableInCombat: true, goldValue: 300,
+  },
 ];
 
 const levelUps: LevelUpCard[] = [

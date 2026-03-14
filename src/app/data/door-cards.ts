@@ -91,6 +91,36 @@ const monsters: MonsterCard[] = [
     level: 12, treasures: 3, levelsGained: 1, badStuff: 'Раздавил! Потеряй 3 уровня.',
     badStuffEffect: { kind: 'lose-levels', levels: 3 },
   },
+  {
+    id: 'm16', name: 'Тёмный Рыцарь', type: 'monster', deck: 'door',
+    description: 'Закованный в чёрную броню безымянный воин',
+    level: 9, treasures: 3, levelsGained: 1, badStuff: 'Сбросил тебя с коня. Потеряй 2 уровня.',
+    badStuffEffect: { kind: 'lose-levels', levels: 2 },
+  },
+  {
+    id: 'm17', name: 'Горный Великан', type: 'monster', deck: 'door',
+    description: 'Великан с вершины гор',
+    level: 11, treasures: 3, levelsGained: 1, badStuff: 'Смял твою броню как бумагу.',
+    badStuffEffect: { kind: 'lose-equipment-slot', slot: 'body' },
+  },
+  {
+    id: 'm18', name: 'Оборотень', type: 'monster', deck: 'door',
+    description: 'При полной луне особенно опасен',
+    level: 7, treasures: 2, levelsGained: 1, badStuff: 'Разорвал твою одежду! Потеряй все карты в руке.',
+    badStuffEffect: { kind: 'lose-hand' },
+  },
+  {
+    id: 'm19', name: 'Вампир', type: 'monster', deck: 'door',
+    description: 'Элегантный кровосос из замка на холме',
+    level: 8, treasures: 2, levelsGained: 1, badStuff: 'Выпил кровь! Потеряй 2 уровня.',
+    badStuffEffect: { kind: 'lose-levels', levels: 2 }, undead: true,
+  },
+  {
+    id: 'm20', name: 'Кикимора', type: 'monster', deck: 'door',
+    description: 'Болотная ведьма с кривыми пальцами',
+    level: 5, treasures: 1, levelsGained: 1, badStuff: 'Запутала в трясине. Потеряй 1 уровень.',
+    badStuffEffect: { kind: 'lose-levels', levels: 1 },
+  },
 ];
 
 const curses: CurseCard[] = [
@@ -118,6 +148,16 @@ const curses: CurseCard[] = [
     id: 'c5', name: 'Проклятие Амнезии', type: 'curse', deck: 'door',
     description: 'Забыл откуда ты',
     effect: { kind: 'lose-race' },
+  },
+  {
+    id: 'c6', name: 'Смена Судьбы', type: 'curse', deck: 'door',
+    description: 'Твои корни внезапно меняются',
+    effect: { kind: 'lose-race' },
+  },
+  {
+    id: 'c7', name: 'Забвение Мастерства', type: 'curse', deck: 'door',
+    description: 'Ты забыл всё, чему учился',
+    effect: { kind: 'lose-class' },
   },
 ];
 
