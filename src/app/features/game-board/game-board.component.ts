@@ -1,11 +1,12 @@
-import { Component, ChangeDetectionStrategy, computed, inject, signal } from '@angular/core';
+import { Component, ChangeDetectionStrategy, computed, inject, signal, effect } from '@angular/core';
 import { Router } from '@angular/router';
 import { GameStateService } from '../../core/engine/game-state.service';
 import { BotService } from '../../core/bot/bot.service';
 import { EquipmentService } from '../../core/engine/equipment.service';
+import { AudioService } from '../../shared/audio.service';
 import { HandComponent } from '../hand/hand.component';
 import { CombatComponent } from '../combat/combat.component';
-import { getCombatStrength, Card } from '../../core/models';
+import { getCombatStrength, Card, LogType } from '../../core/models';
 
 @Component({
   selector: 'app-game-board',
@@ -27,20 +28,23 @@ import { getCombatStrength, Card } from '../../core/models';
         <div class="players-panel">
           <h3>Игроки</h3>
           @for (p of s.players; track p.id; let i = $index) {
-            <div class="player-row" [class.active]="i === s.currentPlayerIndex">
+            <div class="player-row"
+              [class.active]="i === s.currentPlayerIndex"
+              [class.level-up-anim]="levelUpPlayerId() === p.id">
               <span class="player-name">{{ p.name }}</span>
               <span class="player-level">Ур. {{ p.level }}</span>
               <span class="player-strength">Сила: {{ getStrength(i) }}</span>
-              @if (p.className) { <span class="player-tag">{{ p.className }}</span> }
-              @if (p.raceName) { <span class="player-tag">{{ p.raceName }}</span> }
+              @if (p.className) { <span class="player-tag class-tag">{{ p.className }}</span> }
+              @if (p.raceName) { <span class="player-tag race-tag">{{ p.raceName }}</span> }
             </div>
           }
         </div>
 
         <div class="main-area">
-          <div class="phase-info">
+          <div class="phase-info" [class.phase-changed]="phaseChanged()">
             <span class="phase-label">{{ phaseLabel() }}</span>
             <span class="turn-info">Ход: {{ currentPlayerName() }}</span>
+            <button class="sound-btn" (click)="toggleSound()" title="Звук">{{ soundEnabled() ? '🔊' : '🔇' }}</button>
           </div>
 
           @if (isHumanTurn()) {
@@ -108,7 +112,7 @@ import { getCombatStrength, Card } from '../../core/models';
               <h4>Экипировка</h4>
               <div class="equipment-list">
                 @for (item of equippedItems(); track item.id) {
-                  <span class="eq-item">{{ item.name }} (+{{ item.bonus }})</span>
+                  <span class="eq-item">{{ item.name }} (+{{ item.bonus }}){{ item.effect ? ' ✦' : '' }}</span>
                 } @empty {
                   <span class="eq-empty">Нет экипировки</span>
                 }
@@ -127,10 +131,19 @@ import { getCombatStrength, Card } from '../../core/models';
         </div>
 
         <div class="log-panel">
-          <h3>Лог</h3>
+          <div class="log-header">
+            <h3>Лог</h3>
+            <div class="log-filters">
+              <button class="filter-btn" [class.active]="logFilter() === 'all'" (click)="logFilter.set('all')">Все</button>
+              <button class="filter-btn filter-combat" [class.active]="logFilter() === 'combat'" (click)="logFilter.set('combat')">Бой</button>
+              <button class="filter-btn filter-level" [class.active]="logFilter() === 'level'" (click)="logFilter.set('level')">Уровни</button>
+              <button class="filter-btn filter-equipment" [class.active]="logFilter() === 'equipment'" (click)="logFilter.set('equipment')">Экипировка</button>
+              <button class="filter-btn filter-curse" [class.active]="logFilter() === 'curse'" (click)="logFilter.set('curse')">Проклятия</button>
+            </div>
+          </div>
           <div class="log-entries">
             @for (entry of recentLog(); track $index) {
-              <div class="log-entry">{{ entry }}</div>
+              <div class="log-entry" [class]="'log-' + entry.type">{{ entry.text }}</div>
             }
           </div>
         </div>
@@ -145,7 +158,7 @@ import { getCombatStrength, Card } from '../../core/models';
   styles: [`
     .board {
       display: grid;
-      grid-template-columns: 200px 1fr 220px;
+      grid-template-columns: 200px 1fr 240px;
       gap: 12px;
       padding: 12px;
       height: 100vh;
@@ -168,6 +181,7 @@ import { getCombatStrength, Card } from '../../core/models';
       flex-wrap: wrap;
       gap: 4px;
       align-items: center;
+      transition: background 0.2s;
     }
     .player-row.active { background: #e3f2fd; font-weight: bold; }
     .player-name { flex: 1; }
@@ -175,10 +189,11 @@ import { getCombatStrength, Card } from '../../core/models';
     .player-strength { font-size: 11px; color: #666; }
     .player-tag {
       font-size: 10px;
-      background: #f0f0f0;
       padding: 1px 6px;
       border-radius: 3px;
     }
+    .class-tag { background: #e3f2fd; color: #1565c0; }
+    .race-tag { background: #e8f5e9; color: #2e7d32; }
     .main-area {
       display: flex;
       flex-direction: column;
@@ -187,14 +202,24 @@ import { getCombatStrength, Card } from '../../core/models';
     }
     .phase-info {
       display: flex;
-      justify-content: space-between;
       align-items: center;
+      gap: 8px;
       padding: 8px 12px;
       background: #f5f5f5;
       border-radius: 6px;
+      transition: background 0.3s;
     }
-    .phase-label { font-weight: bold; }
+    .phase-info.phase-changed { background: #e8f5e9; }
+    .phase-label { font-weight: bold; flex: 1; }
     .turn-info { font-size: 13px; color: #666; }
+    .sound-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 16px;
+      padding: 2px;
+      line-height: 1;
+    }
     .actions { display: flex; flex-direction: column; align-items: center; gap: 8px; }
     .action-btn {
       padding: 12px 32px;
@@ -215,8 +240,29 @@ import { getCombatStrength, Card } from '../../core/models';
       border-radius: 4px;
     }
     .eq-empty { font-size: 12px; color: #999; }
+    .log-header { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+    .log-header h3 { margin: 0; }
+    .log-filters { display: flex; gap: 3px; flex-wrap: wrap; }
+    .filter-btn {
+      font-size: 10px;
+      padding: 2px 6px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      background: #f9f9f9;
+      cursor: pointer;
+    }
+    .filter-btn.active { background: #1565c0; color: white; border-color: #1565c0; }
+    .filter-combat.active { background: #c62828; border-color: #c62828; }
+    .filter-level.active { background: #f9a825; border-color: #f9a825; color: #000; }
+    .filter-equipment.active { background: #e65100; border-color: #e65100; }
+    .filter-curse.active { background: #6a1b9a; border-color: #6a1b9a; }
     .log-entries { font-size: 12px; }
-    .log-entry { padding: 3px 0; border-bottom: 1px solid #f0f0f0; }
+    .log-entry { padding: 3px 4px; border-bottom: 1px solid #f0f0f0; border-radius: 2px; margin-bottom: 1px; }
+    .log-combat { border-left: 3px solid #c62828; padding-left: 4px; }
+    .log-level { border-left: 3px solid #f9a825; padding-left: 4px; }
+    .log-equipment { border-left: 3px solid #e65100; padding-left: 4px; }
+    .log-curse { border-left: 3px solid #6a1b9a; padding-left: 4px; }
+    .log-system { border-left: 3px solid #90a4ae; padding-left: 4px; }
     .charity-msg { font-size: 14px; color: #c62828; text-align: center; }
     .sell-info { display: flex; align-items: center; gap: 8px; font-size: 14px; }
     .sell-btn { padding: 6px 16px; font-size: 14px; background: #2e7d32; }
@@ -269,6 +315,21 @@ import { getCombatStrength, Card } from '../../core/models';
       border: none;
       border-radius: 6px;
     }
+
+    /* Animations */
+    @keyframes levelUp {
+      0% { background: #e3f2fd; }
+      30% { background: #fff9c4; box-shadow: 0 0 8px #f9a825; }
+      100% { background: #e3f2fd; }
+    }
+    .level-up-anim { animation: levelUp 1.2s ease-out; }
+
+    @keyframes phaseChange {
+      0% { opacity: 0.5; transform: translateY(-4px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    .phase-changed { animation: phaseChange 0.3s ease-out; }
+
     @media (max-width: 768px) {
       .board {
         grid-template-columns: 1fr;
@@ -280,7 +341,7 @@ import { getCombatStrength, Card } from '../../core/models';
         gap: 8px;
       }
       .players-panel { max-height: 160px; overflow-y: auto; }
-      .log-panel { max-height: 160px; overflow-y: auto; order: 3; }
+      .log-panel { max-height: 200px; overflow-y: auto; order: 3; }
       .main-area { overflow-y: visible; }
       .action-btn { width: 100%; box-sizing: border-box; }
       .actions { width: 100%; }
@@ -291,9 +352,44 @@ export class GameBoardComponent {
   private readonly gameState = inject(GameStateService);
   private readonly botService = inject(BotService);
   private readonly equipService = inject(EquipmentService);
+  private readonly audioService = inject(AudioService);
   private readonly router = inject(Router);
 
   readonly state = this.gameState.state;
+  readonly logFilter = signal<'all' | LogType>('all');
+  readonly levelUpPlayerId = signal<string | null>(null);
+  readonly phaseChanged = signal(false);
+  readonly soundEnabled = signal(true);
+
+  private prevLevels = new Map<string, number>();
+  private prevPhase = '';
+
+  constructor() {
+    // Detect level-ups and phase changes for animations + audio
+    effect(() => {
+      const s = this.state();
+      if (!s) return;
+
+      // Detect level-ups
+      s.players.forEach(p => {
+        const prev = this.prevLevels.get(p.id);
+        if (prev !== undefined && p.level > prev) {
+          this.levelUpPlayerId.set(p.id);
+          this.audioService.play('level-up');
+          setTimeout(() => this.levelUpPlayerId.set(null), 1300);
+        }
+        this.prevLevels.set(p.id, p.level);
+      });
+
+      // Detect phase changes for visual feedback
+      const currentPhase = s.turnPhase;
+      if (this.prevPhase && this.prevPhase !== currentPhase) {
+        this.phaseChanged.set(true);
+        setTimeout(() => this.phaseChanged.set(false), 400);
+      }
+      this.prevPhase = currentPhase;
+    });
+  }
 
   readonly currentPlayerName = computed(() => {
     const s = this.state();
@@ -321,7 +417,9 @@ export class GameBoardComponent {
   readonly recentLog = computed(() => {
     const s = this.state();
     if (!s) return [];
-    return s.log.slice(-20).reverse();
+    const filter = this.logFilter();
+    const entries = filter === 'all' ? s.log : s.log.filter(e => e.type === filter);
+    return entries.slice(-30).reverse();
   });
 
   readonly selectedForSale = signal<string[]>([]);
@@ -384,16 +482,36 @@ export class GameBoardComponent {
     return getCombatStrength(s.players[index]!);
   }
 
+  toggleSound(): void {
+    this.audioService.toggle();
+    this.soundEnabled.set(this.audioService.isEnabled());
+  }
+
   kickDoor(): void {
+    this.audioService.play('card-draw');
     this.gameState.kickDoor();
+    const s = this.state();
+    if (s?.turnPhase === 'combat') {
+      this.audioService.play('combat-win'); // Not really win, just entering combat — use different cue
+    } else if (s?.log.slice(-1)[0]?.type === 'curse') {
+      this.audioService.play('curse');
+    }
   }
 
   fight(): void {
-    this.gameState.resolveCombat();
+    const result = this.gameState.resolveCombat();
+    if (result.won) {
+      this.audioService.play('combat-win');
+    } else {
+      this.audioService.play('combat-lose');
+    }
   }
 
   runAway(): void {
-    this.gameState.runAway();
+    const escaped = this.gameState.runAway();
+    if (!escaped) {
+      this.audioService.play('combat-lose');
+    }
   }
 
   useItem(cardId: string): void {
@@ -413,7 +531,19 @@ export class GameBoardComponent {
   }
 
   askForHelp(helperId: string): void {
+    const s = this.state();
+    const helper = s?.players.find(p => p.id === helperId);
+    if (!helper) return;
+
     this.gameState.askForHelp(helperId);
+
+    // If the chosen helper is a bot, let it auto-decide
+    if (!helper.isHuman) {
+      const accepted = this.botService.decideBotHelp(helperId);
+      if (!accepted) {
+        this.gameState.removeHelper();
+      }
+    }
   }
 
   removeHelper(): void {
@@ -421,6 +551,7 @@ export class GameBoardComponent {
   }
 
   lootRoom(): void {
+    this.audioService.play('card-draw');
     this.gameState.lootRoom();
   }
 

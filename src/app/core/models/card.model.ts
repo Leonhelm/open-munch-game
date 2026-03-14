@@ -59,6 +59,11 @@ export interface RaceCard extends BaseCard {
   readonly raceName: RaceName;
 }
 
+export type EquipmentEffect =
+  | { readonly kind: 'bonus-vs-undead'; readonly value: number }
+  | { readonly kind: 'run-bonus'; readonly value: number }
+  | { readonly kind: 'extra-treasure'; readonly value: number };
+
 export interface EquipmentCard extends BaseCard {
   readonly type: 'equipment';
   readonly deck: 'treasure';
@@ -67,6 +72,7 @@ export interface EquipmentCard extends BaseCard {
   readonly classRestriction?: ClassName;
   readonly raceRestriction?: RaceName;
   readonly goldValue: number;
+  readonly effect?: EquipmentEffect;
 }
 
 export interface OneShotCard extends BaseCard {

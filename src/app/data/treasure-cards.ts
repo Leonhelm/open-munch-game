@@ -76,6 +76,42 @@ const equipment: EquipmentCard[] = [
     description: 'Только для дварфов',
     bonus: 3, slot: 'head', goldValue: 600, raceRestriction: 'dwarf',
   },
+  {
+    id: 'e16', name: 'Святая Вода', type: 'equipment', deck: 'treasure',
+    description: 'Эффективна против нежити',
+    bonus: 1, slot: 'hand', goldValue: 400,
+    effect: { kind: 'bonus-vs-undead', value: 3 },
+  },
+  {
+    id: 'e17', name: 'Серебряный Клинок', type: 'equipment', deck: 'treasure',
+    description: 'Особенно опасен для нежити',
+    bonus: 2, slot: 'hand', goldValue: 500,
+    effect: { kind: 'bonus-vs-undead', value: 2 },
+  },
+  {
+    id: 'e18', name: 'Сапоги Ветра', type: 'equipment', deck: 'treasure',
+    description: 'Вы едва касаетесь земли',
+    bonus: 1, slot: 'feet', goldValue: 350,
+    effect: { kind: 'run-bonus', value: 2 },
+  },
+  {
+    id: 'e19', name: 'Шляпа Удачи', type: 'equipment', deck: 'treasure',
+    description: 'Всегда что-нибудь найдётся',
+    bonus: 1, slot: 'head', goldValue: 400,
+    effect: { kind: 'extra-treasure', value: 1 },
+  },
+  {
+    id: 'e20', name: 'Зачарованный Плащ', type: 'equipment', deck: 'treasure',
+    description: 'Придаёт прыткости',
+    bonus: 2, slot: 'body', goldValue: 400,
+    effect: { kind: 'run-bonus', value: 1 },
+  },
+  {
+    id: 'e21', name: 'Амулет Жадности', type: 'equipment', deck: 'treasure',
+    description: 'Монстры всегда носят лишнее',
+    bonus: 0, slot: 'body', goldValue: 500,
+    effect: { kind: 'extra-treasure', value: 2 },
+  },
 ];
 
 const oneShots: OneShotCard[] = [

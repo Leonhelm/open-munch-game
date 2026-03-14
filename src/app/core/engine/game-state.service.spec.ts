@@ -161,7 +161,7 @@ describe('GameStateService', () => {
     it('should contain initial log entry', () => {
       service.startGame(3);
       expect(service.getState()!.log.length).toBeGreaterThan(0);
-      expect(service.getState()!.log[0]).toContain('Игра началась');
+      expect(service.getState()!.log[0]!.text).toContain('Игра началась');
     });
   });
 
@@ -290,7 +290,7 @@ describe('GameStateService', () => {
           // After curse, should be in loot-room phase
           expect(state.turnPhase).toBe('loot-room');
           // Log should mention curse
-          expect(state.log.some(l => l.includes('проклятие'))).toBe(true);
+          expect(state.log.some(l => l.text.includes('проклятие'))).toBe(true);
         }
       }
       // It's statistically very unlikely not to find a curse in 50 tries
@@ -474,7 +474,7 @@ describe('GameStateService', () => {
         const after = service.getState()!;
         // Should gain levelsGained (1) + elf bonus (1) = 2
         expect(after.players[state.currentPlayerIndex]!.level).toBe(levelBefore + 2);
-        expect(after.log.some(l => l.includes('Эльф'))).toBe(true);
+        expect(after.log.some(l => l.text.includes('Эльф'))).toBe(true);
       }
     });
   });
@@ -507,7 +507,7 @@ describe('GameStateService', () => {
       // 500 gold * 2 (halfling) = 1000 = 1 level
       expect(result).toBe(true);
       expect(service.getState()!.players[0]!.level).toBe(levelBefore + 1);
-      expect(service.getState()!.log.some(l => l.includes('Халфлинг'))).toBe(true);
+      expect(service.getState()!.log.some(l => l.text.includes('Халфлинг'))).toBe(true);
     });
   });
 
@@ -572,7 +572,7 @@ describe('GameStateService', () => {
       const after = service.getState()!;
       expect(after.combat).toBeNull();
       expect(after.turnPhase).toBe('charity');
-      expect(after.log.some(l => l.includes('Чары'))).toBe(true);
+      expect(after.log.some(l => l.text.includes('Чары'))).toBe(true);
       // Cards should be removed from hand
       for (const id of cardIds) {
         expect(after.players[after.currentPlayerIndex]!.hand.find(c => c.id === id)).toBeUndefined();
@@ -785,6 +785,122 @@ describe('GameStateService', () => {
       const strengthAfter = service.getPlayerCombatStrength(service.getState()!);
 
       expect(strengthAfter).toBe(strengthBefore + 1);
+    });
+  });
+
+  describe('equipment effects', () => {
+    function setupCombatWithEquipment(
+      svc: GameStateService,
+      equipmentOverride: Partial<EquipmentCard>,
+      monsterOverride: Partial<MonsterCard> = {},
+    ): void {
+      svc.startGame(3);
+      const stateSignal = (svc as any)._state;
+      const s = stateSignal();
+      if (!s) return;
+
+      const equipment: EquipmentCard = {
+        id: 'test-eq',
+        name: 'Test Equipment',
+        type: 'equipment',
+        deck: 'treasure',
+        description: 'test',
+        bonus: 0,
+        slot: 'hand',
+        goldValue: 100,
+        ...equipmentOverride,
+      };
+
+      const monster: MonsterCard = {
+        id: 'test-monster',
+        name: 'Test Monster',
+        type: 'monster',
+        deck: 'door',
+        description: '',
+        level: 5,
+        treasures: 1,
+        levelsGained: 1,
+        badStuff: 'Lose 1 level',
+        badStuffEffect: { kind: 'lose-levels', levels: 1 },
+        ...monsterOverride,
+      };
+
+      const player = s.players[s.currentPlayerIndex]!;
+      const updatedPlayer: Player = {
+        ...player,
+        equipment: { ...EMPTY_EQUIPMENT, handLeft: equipment },
+      };
+      const players = s.players.map((p: Player, i: number) =>
+        i === s.currentPlayerIndex ? updatedPlayer : p,
+      );
+
+      stateSignal.set({
+        ...s,
+        players,
+        turnPhase: 'combat',
+        combat: {
+          monster,
+          playerBonuses: [],
+          monsterBonuses: 0,
+          helperId: null,
+          helperBonuses: [],
+          warriorBonuses: 0,
+        },
+      });
+    }
+
+    it('should grant bonus-vs-undead against undead monsters', () => {
+      setupCombatWithEquipment(
+        service,
+        { bonus: 1, effect: { kind: 'bonus-vs-undead', value: 3 } },
+        { undead: true, level: 5 },
+      );
+      const state = service.getState()!;
+      const player = state.players[state.currentPlayerIndex]!;
+      const baseStrength = player.level + 1; // level + equipment bonus
+      const actualStrength = service.getPlayerCombatStrength(state);
+      // Should have base strength + undead bonus (3)
+      expect(actualStrength).toBe(baseStrength + 3);
+    });
+
+    it('should NOT grant bonus-vs-undead against non-undead monsters', () => {
+      setupCombatWithEquipment(
+        service,
+        { bonus: 1, effect: { kind: 'bonus-vs-undead', value: 3 } },
+        { undead: false, level: 5 },
+      );
+      const state = service.getState()!;
+      const player = state.players[state.currentPlayerIndex]!;
+      const baseStrength = player.level + 1; // level + equipment bonus only
+      const actualStrength = service.getPlayerCombatStrength(state);
+      expect(actualStrength).toBe(baseStrength);
+    });
+
+    it('should grant extra treasures with extra-treasure effect on combat win', () => {
+      setupCombatWithEquipment(
+        service,
+        { bonus: 10, effect: { kind: 'extra-treasure', value: 2 } },
+        { level: 1, treasures: 1 },
+      );
+      const state = service.getState()!;
+      const player = state.players[state.currentPlayerIndex]!;
+      const handBefore = player.hand.length;
+
+      const result = service.resolveCombat();
+      expect(result.won).toBe(true);
+
+      const after = service.getState()!;
+      const handAfter = after.players[state.currentPlayerIndex]!.hand.length;
+      // Should have received 1 (base) + 2 (extra) = 3 treasures
+      expect(handAfter).toBeGreaterThanOrEqual(handBefore + 3);
+    });
+
+    it('log entries have correct types', () => {
+      service.startGame(3);
+      const state = service.getState()!;
+      const firstEntry = state.log[0]!;
+      expect(firstEntry.text).toContain('Игра началась');
+      expect(firstEntry.type).toBe('system');
     });
   });
 });

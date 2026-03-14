@@ -275,6 +275,13 @@ export class CardComponent {
         if (c.slot === 'two-hands') lines.push('Двуручное: занимает оба слота рук');
         if (c.classRestriction) lines.push(`Только для: ${CLASS_LABELS[c.classRestriction]}`);
         if (c.raceRestriction) lines.push(`Только для расы: ${RACE_LABELS[c.raceRestriction]}`);
+        if (c.effect) {
+          switch (c.effect.kind) {
+            case 'bonus-vs-undead': lines.push(`Против нежити: +${c.effect.value} к силе`); break;
+            case 'run-bonus': lines.push(`Бонус побега: +${c.effect.value} к броску кубика`); break;
+            case 'extra-treasure': lines.push(`За победу: +${c.effect.value} доп. сокровищ`); break;
+          }
+        }
         return lines;
       }
       case 'one-shot': {
