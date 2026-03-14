@@ -1,6 +1,13 @@
 import { Card, DoorCard, MonsterCard, OneShotCard } from './card.model';
 import { Player } from './player.model';
 
+export type LogType = 'combat' | 'level' | 'equipment' | 'curse' | 'system';
+
+export interface LogEntry {
+  readonly text: string;
+  readonly type: LogType;
+}
+
 export type TurnPhase =
   | 'kick-door'
   | 'combat'
@@ -26,7 +33,7 @@ export interface GameState {
   readonly treasureDeck: readonly Card[];
   readonly treasureDiscard: readonly Card[];
   readonly combat: CombatState | null;
-  readonly log: readonly string[];
+  readonly log: readonly LogEntry[];
   readonly winnerId: string | null;
   readonly thiefBackstabUsed: boolean;
   readonly skipTurnPlayerIds: readonly string[];

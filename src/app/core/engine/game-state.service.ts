@@ -1,7 +1,7 @@
 import { computed, Injectable, signal } from '@angular/core';
 import {
   BadStuffEffect, Card, CombatState, CurseCard, CurseEffect, DoorCard,
-  EquipmentCard, GameState, MonsterCard, OneShotCard, Player, TurnPhase,
+  EquipmentCard, GameState, LogEntry, MonsterCard, OneShotCard, Player, TurnPhase,
   createPlayer, TreasureCard, EMPTY_EQUIPMENT, getClassCombatBonus, getCombatStrength,
 } from '../models';
 import { DeckService, Deck } from './deck.service';
@@ -60,7 +60,7 @@ export class GameStateService {
       treasureDeck: this.treasureDeck.cards,
       treasureDiscard: this.treasureDeck.discard,
       combat: null,
-      log: ['Игра началась!'],
+      log: [{ text: 'Игра началась!', type: 'system' as const }],
       winnerId: null,
       thiefBackstabUsed: false,
       skipTurnPlayerIds: [],
@@ -84,7 +84,7 @@ export class GameStateService {
             helperBonuses: [],
             warriorBonuses: 0,
           },
-          log: [...state.log, `${this.getCurrentPlayerName(state)} выбил дверь и встретил ${card.name} (уровень ${card.level})!`],
+          log: [...state.log, { text: `${this.getCurrentPlayerName(state)} выбил дверь и встретил ${card.name} (уровень ${card.level})!`, type: 'combat' }],
         };
       }
 
@@ -98,7 +98,7 @@ export class GameStateService {
         ...state,
         players,
         turnPhase: 'loot-room' as TurnPhase,
-        log: [...state.log, `${this.getCurrentPlayerName(state)} нашёл карту: ${card.name}`],
+        log: [...state.log, { text: `${this.getCurrentPlayerName(state)} нашёл карту: ${card.name}`, type: 'system' }],
       };
     });
 
@@ -115,7 +115,7 @@ export class GameStateService {
         ...state,
         players,
         turnPhase: 'charity' as TurnPhase,
-        log: [...state.log, `${this.getCurrentPlayerName(state)} обыскал комнату и нашёл: ${card.name}`],
+        log: [...state.log, { text: `${this.getCurrentPlayerName(state)} обыскал комнату и нашёл: ${card.name}`, type: 'system' }],
       };
     });
 
@@ -150,6 +150,14 @@ export class GameStateService {
       getClassCombatBonus(player, state.combat.monster) +
       state.combat.warriorBonuses;
 
+    // Equipment special effects
+    if (state.combat.monster.undead) {
+      const allEquipped = this.equipmentService.getAllEquipped(player.equipment);
+      strength += allEquipped
+        .filter(eq => eq.effect?.kind === 'bonus-vs-undead')
+        .reduce((sum, eq) => sum + (eq.effect as { kind: 'bonus-vs-undead'; value: number }).value, 0);
+    }
+
     // Add helper strength
     if (state.combat.helperId) {
       const helper = state.players.find(p => p.id === state.combat!.helperId);
@@ -177,27 +185,37 @@ export class GameStateService {
   }
 
   runAway(): boolean {
+    const state = this._state();
     const diceRoll = Math.floor(Math.random() * 6) + 1;
-    const escaped = diceRoll >= 5;
+    let runBonus = 0;
+    if (state?.combat) {
+      const player = state.players[state.currentPlayerIndex]!;
+      const allEquipped = this.equipmentService.getAllEquipped(player.equipment);
+      runBonus = allEquipped
+        .filter(eq => eq.effect?.kind === 'run-bonus')
+        .reduce((sum, eq) => sum + (eq.effect as { kind: 'run-bonus'; value: number }).value, 0);
+    }
+    const escapeThreshold = Math.max(2, 5 - runBonus);
+    const escaped = diceRoll >= escapeThreshold;
 
-    this.updateState(state => {
-      if (!state.combat) return state;
+    this.updateState(s => {
+      if (!s.combat) return s;
       if (escaped) {
         return {
-          ...state,
+          ...s,
           turnPhase: 'charity' as TurnPhase,
           combat: null,
-          log: [...state.log, `${this.getCurrentPlayerName(state)} бросил ${diceRoll} и сбежал!`],
+          log: [...s.log, { text: `${this.getCurrentPlayerName(s)} бросил ${diceRoll} и сбежал!`, type: 'combat' }],
         };
       }
 
       // Bad stuff
-      const afterBadStuff = this.applyBadStuff(state);
+      const afterBadStuff = this.applyBadStuff(s);
       return {
         ...afterBadStuff,
         turnPhase: 'charity' as TurnPhase,
         combat: null,
-        log: [...afterBadStuff.log, `${this.getCurrentPlayerName(state)} бросил ${diceRoll} и не смог сбежать! ${state.combat!.monster.badStuff}`],
+        log: [...afterBadStuff.log, { text: `${this.getCurrentPlayerName(s)} бросил ${diceRoll} и не смог сбежать! ${s.combat!.monster.badStuff}`, type: 'combat' }],
       };
     });
 
@@ -222,12 +240,12 @@ export class GameStateService {
 
       // Skip players who must miss their turn
       while (skipIds.includes(s.players[nextIndex]!.id)) {
-        logMessages.push(`${s.players[nextIndex]!.name} пропускает ход!`);
+        logMessages.push({ text: `${s.players[nextIndex]!.name} пропускает ход!`, type: 'system' });
         skipIds = skipIds.filter(id => id !== s.players[nextIndex]!.id);
         nextIndex = (nextIndex + 1) % s.players.length;
       }
 
-      logMessages.push(`Ход переходит к ${s.players[nextIndex]!.name}`);
+      logMessages.push({ text: `Ход переходит к ${s.players[nextIndex]!.name}`, type: 'system' });
       return {
         ...s,
         currentPlayerIndex: nextIndex,
@@ -256,7 +274,7 @@ export class GameStateService {
             ? { ...p, className: card.className, hand: p.hand.filter(c => c.id !== cardId) }
             : p
         );
-        return { ...s, players, log: [...s.log, `${player.name} стал ${card.name}!`] };
+        return { ...s, players, log: [...s.log, { text: `${player.name} стал ${card.name}!`, type: 'system' }] };
       });
       return true;
     }
@@ -268,7 +286,7 @@ export class GameStateService {
             ? { ...p, raceName: card.raceName, hand: p.hand.filter(c => c.id !== cardId) }
             : p
         );
-        return { ...s, players, log: [...s.log, `${player.name} стал ${card.name}!`] };
+        return { ...s, players, log: [...s.log, { text: `${player.name} стал ${card.name}!`, type: 'system' }] };
       });
       return true;
     }
@@ -282,7 +300,7 @@ export class GameStateService {
         const players = s.players.map((p, i) =>
           i === s.currentPlayerIndex ? result.player : p
         );
-        return { ...s, players, log: [...s.log, `${player.name} надел ${card.name} (+${eqCard.bonus})`] };
+        return { ...s, players, log: [...s.log, { text: `${player.name} надел ${card.name} (+${eqCard.bonus})`, type: 'equipment' }] };
       });
       return true;
     }
@@ -294,7 +312,7 @@ export class GameStateService {
             ? { ...p, level: p.level + 1, hand: p.hand.filter(c => c.id !== cardId) }
             : p
         );
-        const newState = { ...s, players, log: [...s.log, `${player.name} использовал ${card.name} и получил уровень!`] };
+        const newState = { ...s, players, log: [...s.log, { text: `${player.name} использовал ${card.name} и получил уровень!`, type: 'level' as const }] };
         return this.checkWinCondition(newState);
       });
       return true;
@@ -361,8 +379,8 @@ export class GameStateService {
         doorDiscard: [...s.doorDiscard, ...doorDiscards],
         treasureDiscard: [...s.treasureDiscard, ...treasureDiscards],
         log: levelsGained > 0
-          ? [...s.log, `${this.getCurrentPlayerName(s)} продал карты за ${effectiveGold} золота и получил ${levelsGained} уровень!${player.raceName === 'halfling' ? ' (Халфлинг: двойная цена!)' : ''}`]
-          : [...s.log, `${this.getCurrentPlayerName(s)} продал карты за ${effectiveGold} золота (недостаточно для уровня)`],
+          ? [...s.log, { text: `${this.getCurrentPlayerName(s)} продал карты за ${effectiveGold} золота и получил ${levelsGained} уровень!${player.raceName === 'halfling' ? ' (Халфлинг: двойная цена!)' : ''}`, type: 'level' }]
+          : [...s.log, { text: `${this.getCurrentPlayerName(s)} продал карты за ${effectiveGold} золота (недостаточно для уровня)`, type: 'system' }],
       };
 
       if (levelsGained > 0) {
@@ -397,7 +415,7 @@ export class GameStateService {
         combat: { ...s.combat, warriorBonuses: s.combat.warriorBonuses + 1 },
         doorDiscard: [...s.doorDiscard, ...doorDiscards],
         treasureDiscard: [...s.treasureDiscard, ...treasureDiscards],
-        log: [...s.log, `${this.getCurrentPlayerName(s)} использовал Берсерк, сбросив ${card.name} для +1!`],
+        log: [...s.log, { text: `${this.getCurrentPlayerName(s)} использовал Берсерк, сбросив ${card.name} для +1!`, type: 'combat' }],
       };
     });
     return true;
@@ -429,7 +447,7 @@ export class GameStateService {
         turnPhase: 'charity' as TurnPhase,
         doorDiscard: [...s.doorDiscard, ...doorDiscards],
         treasureDiscard: [...s.treasureDiscard, ...treasureDiscards],
-        log: [...s.log, `${this.getCurrentPlayerName(s)} использовал Чары и автоматически сбежал!`],
+        log: [...s.log, { text: `${this.getCurrentPlayerName(s)} использовал Чары и автоматически сбежал!`, type: 'combat' }],
       };
     });
     return true;
@@ -471,7 +489,7 @@ export class GameStateService {
           ...s,
           players,
           thiefBackstabUsed: true,
-          log: [...s.log, `${this.getCurrentPlayerName(s)} бросил ${diceRoll} и украл карту у ${targetPlayer.name}!`],
+          log: [...s.log, { text: `${this.getCurrentPlayerName(s)} бросил ${diceRoll} и украл карту у ${targetPlayer.name}!`, type: 'system' }],
         };
       } else {
         const players = s.players.map((p, i) => {
@@ -485,7 +503,7 @@ export class GameStateService {
           ...s,
           players,
           thiefBackstabUsed: true,
-          log: [...s.log, `${this.getCurrentPlayerName(s)} бросил ${diceRoll} и провалил кражу у ${targetPlayer.name}! -1 уровень`],
+          log: [...s.log, { text: `${this.getCurrentPlayerName(s)} бросил ${diceRoll} и провалил кражу у ${targetPlayer.name}! -1 уровень`, type: 'system' }],
         };
       }
     });
@@ -506,7 +524,7 @@ export class GameStateService {
       return {
         ...s,
         combat: { ...s.combat, helperId },
-        log: [...s.log, `${this.getCurrentPlayerName(s)} попросил помощи у ${helper.name}!`],
+        log: [...s.log, { text: `${this.getCurrentPlayerName(s)} попросил помощи у ${helper.name}!`, type: 'combat' }],
       };
     });
     return true;
@@ -564,7 +582,11 @@ export class GameStateService {
       const player = state.players[state.currentPlayerIndex]!;
       const elfBonus = player.raceName === 'elf' ? 1 : 0;
       const levelsGained = monster.levelsGained + elfBonus;
-      const treasureCount = monster.treasures;
+      const allEquipped = this.equipmentService.getAllEquipped(player.equipment);
+      const extraTreasures = allEquipped
+        .filter(eq => eq.effect?.kind === 'extra-treasure')
+        .reduce((sum, eq) => sum + (eq.effect as { kind: 'extra-treasure'; value: number }).value, 0);
+      const treasureCount = monster.treasures + extraTreasures;
 
       const allTreasures: Card[] = [];
       for (let i = 0; i < treasureCount; i++) {
@@ -601,14 +623,17 @@ export class GameStateService {
         return p;
       });
 
-      const logMessages = [...state.log, `${this.getCurrentPlayerName(state)} победил ${monster.name}! +${levelsGained} уровень, +${treasureCount} сокровищ`];
+      const logMessages = [...state.log, { text: `${this.getCurrentPlayerName(state)} победил ${monster.name}! +${levelsGained} уровень, +${treasureCount} сокровищ`, type: 'combat' as const }];
       if (elfBonus > 0) {
-        logMessages.push(`Эльф получает +1 бонусный уровень за победу!`);
+        logMessages.push({ text: 'Эльф получает +1 бонусный уровень за победу!', type: 'level' as const });
+      }
+      if (extraTreasures > 0) {
+        logMessages.push({ text: `Бонус за экипировку: +${extraTreasures} доп. сокровищ!`, type: 'equipment' as const });
       }
       if (state.combat.helperId) {
         const helper = state.players.find(p => p.id === state.combat!.helperId);
         if (helper) {
-          logMessages.push(`${helper.name} получает ${helperTreasures.length} сокровищ за помощь`);
+          logMessages.push({ text: `${helper.name} получает ${helperTreasures.length} сокровищ за помощь`, type: 'combat' as const });
         }
       }
 
@@ -686,7 +711,7 @@ export class GameStateService {
       nextState = {
         ...nextState,
         skipTurnPlayerIds: [...nextState.skipTurnPlayerIds, player.id],
-        log: [...nextState.log, `${player.name} пропускает следующий ход!`],
+        log: [...nextState.log, { text: `${player.name} пропускает следующий ход!`, type: 'system' }],
       };
     }
 
@@ -760,14 +785,14 @@ export class GameStateService {
       doorDiscard: [...state.doorDiscard, ...doorDiscards],
       treasureDiscard: [...state.treasureDiscard, ...treasureDiscards],
       turnPhase: 'loot-room' as TurnPhase,
-      log: [...state.log, `${this.getCurrentPlayerName(state)} попал под проклятие: ${card.name}!`],
+      log: [...state.log, { text: `${this.getCurrentPlayerName(state)} попал под проклятие: ${card.name}!`, type: 'curse' }],
     };
   }
 
   private checkWinCondition(state: GameState): GameState {
     const winner = state.players.find(p => p.level >= 10);
     if (winner) {
-      return { ...state, winnerId: winner.id, log: [...state.log, `${winner.name} достиг 10 уровня и победил!`] };
+      return { ...state, winnerId: winner.id, log: [...state.log, { text: `${winner.name} достиг 10 уровня и победил!`, type: 'level' as const }] };
     }
     return state;
   }
