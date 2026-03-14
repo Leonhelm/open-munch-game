@@ -269,6 +269,22 @@ import { getCombatStrength, Card } from '../../core/models';
       border: none;
       border-radius: 6px;
     }
+    @media (max-width: 768px) {
+      .board {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto;
+        height: auto;
+        min-height: 100vh;
+        overflow-y: auto;
+        padding: 8px;
+        gap: 8px;
+      }
+      .players-panel { max-height: 160px; overflow-y: auto; }
+      .log-panel { max-height: 160px; overflow-y: auto; order: 3; }
+      .main-area { overflow-y: visible; }
+      .action-btn { width: 100%; box-sizing: border-box; }
+      .actions { width: 100%; }
+    }
   `],
 })
 export class GameBoardComponent {

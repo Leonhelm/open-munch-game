@@ -29,6 +29,7 @@ export interface GameState {
   readonly log: readonly string[];
   readonly winnerId: string | null;
   readonly thiefBackstabUsed: boolean;
+  readonly skipTurnPlayerIds: readonly string[];
 }
 
 export function getCurrentPlayer(state: GameState): Player {

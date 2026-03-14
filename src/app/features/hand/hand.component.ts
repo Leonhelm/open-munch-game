@@ -29,6 +29,9 @@ import { CardComponent } from '../card/card.component';
     .hand-title { font-weight: bold; margin-bottom: 6px; }
     .hand-cards { display: flex; gap: 8px; flex-wrap: wrap; }
     .hand-slot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    @media (max-width: 768px) {
+      .hand-cards { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 8px; }
+    }
     .play-btn {
       padding: 2px 12px;
       font-size: 12px;
